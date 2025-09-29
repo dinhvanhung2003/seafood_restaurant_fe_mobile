@@ -1,59 +1,59 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
+// app/_layout.tsx
+import { AuthProvider, useAuth } from '@providers/AuthProvider';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
-import 'react-native-reanimated';
+import { ActivityIndicator, View } from 'react-native';
+import FlashMessage from 'react-native-flash-message';
+import '../global.css';
 
-import { useColorScheme } from '@/components/useColorScheme';
-
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
-
-export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
-};
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
-
-export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-    ...FontAwesome.font,
-  });
-
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
-  useEffect(() => {
-    if (error) throw error;
-  }, [error]);
+const qc = new QueryClient();
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, loading /*, role*/ } = useAuth();
+  const segments = useSegments();            // ví dụ: ["(auth)", "login"] hoặc ["(app)"]
+  const router = useRouter();
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+    if (loading) return;
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    // Nếu CHƯA đăng nhập mà đang ở (app) -> đẩy về login
+    if (!isAuthenticated && !inAuthGroup) {
+      router.replace('/(auth)/login');
+      return;
     }
-  }, [loaded]);
 
-  if (!loaded) {
-    return null;
+    // Nếu ĐÃ đăng nhập mà đang ở (auth) -> đẩy vào app
+    if (isAuthenticated && inAuthGroup) {
+      router.replace('/(app)');
+      return;
+    }
+
+    // Nếu muốn check role:
+    // if (isAuthenticated && role !== 'WAITER') router.replace('/(auth)/no-permission');
+  }, [isAuthenticated, loading, segments]);
+
+  if (loading) {
+    return (
+       <QueryClientProvider client={qc}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+      </QueryClientProvider>
+    );
   }
 
-  return <RootLayoutNav />;
+  return <>{children}</>;
 }
 
-function RootLayoutNav() {
-  const colorScheme = useColorScheme();
-
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
-      </Stack>
-    </ThemeProvider>
+    <AuthProvider>
+      <AuthGate>
+        <Stack screenOptions={{ headerShown: false }} />
+        <FlashMessage position="top" />
+      </AuthGate>
+    </AuthProvider>
   );
 }

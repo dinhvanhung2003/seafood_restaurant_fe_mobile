@@ -1,0 +1,18 @@
+/* global.css */
+@config "./tailwind.config.js";
+
+/* Bắt buộc để NativeWind tạo utilities */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ví dụ: tạo class tái sử dụng */
+.btn {
+  @apply rounded-xl px-4 py-3 bg-blue-600 text-white font-semibold;
+}
+.btn-secondary {
+  @apply rounded-xl px-4 py-3 bg-gray-200 text-gray-800 font-semibold;
+}
+.input {
+  @apply border border-gray-300 rounded-xl px-4 py-3 text-base;
+}
