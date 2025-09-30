@@ -1,13 +1,13 @@
 // app/_layout.tsx
 import { AuthProvider, useAuth } from '@providers/AuthProvider';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import QueryProvider from '@providers/QueryProvider';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import FlashMessage from 'react-native-flash-message';
 import '../global.css';
 
-const qc = new QueryClient();
+
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading /*, role*/ } = useAuth();
   const segments = useSegments();            // ví dụ: ["(auth)", "login"] hoặc ["(app)"]
@@ -36,11 +36,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-       <QueryClientProvider client={qc}>
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      
+ <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
       </View>
-      </QueryClientProvider>
+
+     
+     
     );
   }
 
@@ -49,11 +51,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
+    <QueryProvider>
+
+       <AuthProvider>
       <AuthGate>
         <Stack screenOptions={{ headerShown: false }} />
         <FlashMessage position="top" />
       </AuthGate>
     </AuthProvider>
+    </QueryProvider>
+   
   );
 }

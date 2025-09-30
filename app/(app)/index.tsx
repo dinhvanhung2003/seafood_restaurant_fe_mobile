@@ -1,155 +1,211 @@
-// app/(app)/index.tsx
+import HeaderBar from '@components/HeaderBar';
 import { useAreas } from '@hooks/useArea';
 import { useOrders } from '@hooks/useOrder';
 import tw from '@lib/tw';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
-
+import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, View } from 'react-native';
 type TableVM = {
   id: string;
   name: string;
-  floor: string;
+  floor?: string;
   status: 'using' | 'empty';
-  amount: number;         // tổng tiền hiện tại
-  startedAt?: string;     // thời điểm tạo đơn (để hiển thị “xg yp”)
+  amount: number;
+  startedAt?: string;
 };
 
-function timeAgoShort(iso?: string) {
-  if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.max(0, Math.floor(ms / 60000));
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
+const fmtMoney = (n: number) => {
+  try { return n.toLocaleString('vi-VN'); } catch { return String(n); }
+};
+
+const minutesBetween = (iso?: string) => {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  const diff = Date.now() - (isNaN(t) ? 0 : t);
+  return Math.max(0, Math.round(diff / 60000));
+};
+
+const fmtElapsed = (iso?: string) => {
+  const m = minutesBetween(iso);
+  const h = Math.floor(m / 60), mm = m % 60;
+  if (h <= 0 && mm <= 0) return '';
   if (h <= 0) return `${mm}p`;
   return `${h}g ${mm}p`;
-}
+};
 
-export default function HomeScreen() {
+export default function TablesScreen() {
   const router = useRouter();
+
+  // ✅ luôn gọi hook ở top-level, không return sớm trước chúng
   const areasQ = useAreas();
-  const { activeOrdersQuery, orders, orderIds } = useOrders();
+  const { orders, activeOrdersQuery } = useOrders();
 
-  const floors = useMemo(
-    () => ['Tất cả', ...new Set((areasQ.data ?? []).map(a => a.name))],
-    [areasQ.data]
-  );
+  const [statusTab, setStatusTab] = useState<'all' | 'using' | 'empty'>('all');
   const [floor, setFloor] = useState<string>('Tất cả');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // map Areas -> TableVM và hợp nhất trạng thái đơn hàng
+  const areas = areasQ.data ?? [];
+
+  const floorOptions = useMemo(
+    () => ['Tất cả', ...Array.from(new Set((areas ?? []).map((a: any) => a.name)))],
+    [areas]
+  );
+
+  const orderCreatedAt: Record<string, string | undefined> = useMemo(() => {
+    const rows: any[] = activeOrdersQuery?.data ?? [];
+    const dict: Record<string, string> = {};
+    for (const o of rows) {
+      const tid = o.table?.id ?? o.tableId;
+      if (tid) dict[tid] = o.createdAt as string;
+    }
+    return dict;
+  }, [activeOrdersQuery?.data]);
+
   const tables: TableVM[] = useMemo(() => {
-    const base: TableVM[] = [];
-    for (const a of areasQ.data ?? []) {
+    const list: TableVM[] = [];
+    for (const a of areas ?? []) {
       for (const t of a.tables ?? []) {
-        const hasOrder = !!orders[t.id];
-        // tổng tiền đơn hiện tại
-        const items = orders[t.id]?.orders[0]?.items ?? [];
-        const totalQty = items.reduce((s, it) => s + it.qty, 0);
-        const amount =
-          (activeOrdersQuery.data ?? [])
-            .find((o: any) => o.id === orderIds[t.id])
-            ?.items?.reduce(
-              (sum: number, it: any) =>
-                sum + (Number(it?.menuItem?.price ?? it?.price ?? 0) * Number(it?.quantity ?? 0)),
-              0
-            ) ?? 0;
-
-        // giờ bắt đầu
-        const startedAt = (activeOrdersQuery.data ?? [])
-          .find((o: any) => o.id === orderIds[t.id])?.createdAt as string | undefined;
-
-        base.push({
+        const isUsing = !!orders[t.id];
+        const amount = 0; // TODO: thay bằng tổng tiền nếu bạn có priceDict
+        list.push({
           id: t.id,
           name: t.name,
           floor: a.name,
-          status: hasOrder ? 'using' : 'empty',
-          amount: amount || totalQty ? amount : 0,
-          startedAt,
+          status: isUsing ? 'using' : 'empty',
+          amount,
+          startedAt: orderCreatedAt[t.id],
         });
       }
     }
-    // lọc theo tầng
-    return base.filter(b => floor === 'Tất cả' || b.floor === floor);
-  }, [areasQ.data, orders, orderIds, activeOrdersQuery.data, floor]);
+    return list;
+  }, [areas, orders, orderCreatedAt]);
 
-  if (areasQ.isLoading || activeOrdersQuery.isLoading) {
+  const filtered = useMemo(() => {
+    return tables.filter((t) => {
+      const okFloor = floor === 'Tất cả' ? true : t.floor === floor;
+      const okStatus =
+        statusTab === 'all' ? true : statusTab === 'using' ? t.status === 'using' : t.status === 'empty';
+      return okFloor && okStatus;
+    });
+  }, [tables, floor, statusTab]);
+
+  const renderTable = ({ item }: { item: TableVM }) => {
+    const isSelected = selectedId === item.id;
+    const isUsing = item.status === 'using';
+    const border = isUsing ? (isSelected ? 'border-blue-500' : 'border-blue-300') : 'border-slate-200';
+    const bg = isUsing ? 'bg-blue-100' : 'bg-white';
+
     return (
-      <View style={tw`flex-1 items-center justify-center`}>
-        <ActivityIndicator />
-        <Text style={tw`mt-2 text-slate-500`}>Đang tải…</Text>
-      </View>
+      <Pressable
+        onPress={() => {
+          setSelectedId(item.id);
+          router.push({ pathname: '/(app)/table/[id]', params: { id: item.id, name: item.name } });
+        }}
+        style={tw`m-2 w-[46%] rounded-2xl border ${border} ${bg} px-4 py-4`}
+      >
+        <Text style={tw`text-base font-bold text-slate-900`}>{item.name}</Text>
+        {isUsing ? (
+          <>
+            <Text style={tw`mt-2 text-slate-500`}>{fmtElapsed(item.startedAt)}</Text>
+            <Text style={tw`mt-1 text-blue-600 font-semibold`}>{fmtMoney(item.amount)}</Text>
+          </>
+        ) : (
+          <Text style={tw`mt-2 text-slate-400`}>Trống</Text>
+        )}
+      </Pressable>
     );
-  }
+  };
 
   return (
-    <View style={tw`flex-1 bg-white`}>
-      {/* Header đơn giản */}
-      <View style={tw`px-4 pt-4 pb-2`}>
+    <View style={tw`flex-1 bg-white mt-10`}>
+      {/* Header */}
+        <HeaderBar
+        onMenu={() => {}}
+        onSearch={() => {}}
+        onNotify={() => {}}
+        onOrders={() => {}}
+        // logoSource={require('@/assets/kiotviet.png')}
+      />
+      <View style={tw`pt-3 pb-2 px-4`}>
         <Text style={tw`text-xl font-extrabold text-slate-900`}>Phòng bàn</Text>
       </View>
 
-      {/* Tabs tầng/khu */}
-      <FlatList
-        data={floors}
-        keyExtractor={(s) => s}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={tw`px-3`}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => setFloor(item)}
-            style={tw.style(
-              `px-4 h-9 mr-2 rounded-full border`,
-              floor === item ? `bg-blue-50 border-blue-500` : `bg-white border-slate-200`
-            )}
-          >
-            <Text style={tw.style(`text-sm leading-9`,
-              floor === item ? `text-blue-600 font-bold` : `text-slate-700`
-            )}>
-              {item}
-            </Text>
-          </Pressable>
-        )}
-      />
+      {/* Tabs */}
+      <View style={tw`px-4`}>
+        <View style={tw`flex-row gap-3 mb-3`}>
+          {([
+            { key: 'all', label: 'Tất cả' },
+            { key: 'using', label: 'Sử dụng' },
+            { key: 'empty', label: 'Còn trống' },
+          ] as const).map((t) => {
+            const active = statusTab === t.key;
+            return (
+              <Pressable
+                key={t.key}
+                onPress={() => setStatusTab(t.key)}
+                style={tw.style(
+                  'px-4 h-9 rounded-full items-center justify-center',
+                  active ? 'bg-blue-600' : 'bg-slate-100'
+                )}
+              >
+                <Text style={tw`${active ? 'text-white' : 'text-slate-700'} font-medium`}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
 
-      {/* Lưới bàn */}
-      <FlatList
-        data={tables}
-        keyExtractor={(t) => t.id}
-        numColumns={2}
-        contentContainerStyle={tw`p-3 pb-6`}
-        columnWrapperStyle={tw`mb-3`}
-        renderItem={({ item }) => {
-          const using = item.status === 'using';
+      {/* Floor chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={tw`px-4 pb-3 gap-2`}>
+        {floorOptions.map((f) => {
+          const active = floor === f;
           return (
             <Pressable
-              // onPress={() => router.push({ pathname: '/(app)/order', params: { tableId: item.id } })}
+              key={f}
+              onPress={() => setFloor(f)}
               style={tw.style(
-                `flex-1 mr-3 rounded-2xl p-4 border`,
-                using ? `bg-blue-50 border-blue-300` : `bg-white border-slate-200`
+                'px-4 h-9 rounded-full items-center justify-center border',
+                active ? 'bg-blue-50 border-blue-300' : 'bg-white border-slate-200'
               )}
             >
-              <Text style={tw`text-base font-bold text-slate-900`} numberOfLines={1}>
-                {item.name}
-              </Text>
-
-              {using ? (
-                <>
-                  <Text style={tw`text-[11px] text-slate-500 mt-2`}>{timeAgoShort(item.startedAt)}</Text>
-                  <Text style={tw`mt-1 text-blue-700 font-extrabold`}>{item.amount.toLocaleString('vi-VN')}</Text>
-                </>
-              ) : (
-                <Text style={tw`mt-2 text-slate-400`}>Trống</Text>
-              )}
+              <Text style={tw`${active ? 'text-blue-700' : 'text-slate-700'} font-medium`}>{f}</Text>
             </Pressable>
           );
-        }}
+        })}
+      </ScrollView>
+
+      {/* Mang về / Giao đi */}
+      <View style={tw`px-3`}>
+        <View style={tw`flex-row`}>
+          <Pressable style={tw`flex-1 m-2 rounded-2xl border border-slate-200 bg-white px-4 py-6`}>
+            <Text style={tw`text-base font-semibold`}>🧺  Mang về</Text>
+          </Pressable>
+          <Pressable style={tw`flex-1 m-2 rounded-2xl border border-slate-200 bg-white px-4 py-6`}>
+            <Text style={tw`text-base font-semibold`}>🚚  Giao đi</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Grid */}
+      <FlatList
+        data={filtered}
+        keyExtractor={(t) => t.id}
+        numColumns={2}
+        renderItem={renderTable}
+        contentContainerStyle={tw`px-1 pb-8`}
         ListEmptyComponent={
-          <View style={tw`px-4 py-8 items-center`}>
-            <Text style={tw`text-slate-500`}>Chưa có dữ liệu bàn</Text>
+          <View style={tw`mt-10 items-center`}>
+            <Text style={tw`text-slate-500`}>Không có bàn phù hợp.</Text>
           </View>
         }
       />
+
+      {/* Loading overlay (thay cho return sớm) */}
+      {areasQ.isLoading && (
+        <View style={tw`absolute inset-0 items-center justify-center bg-white/60`}>
+          <ActivityIndicator />
+        </View>
+      )}
     </View>
   );
 }
