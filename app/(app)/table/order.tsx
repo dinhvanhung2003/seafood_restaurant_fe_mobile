@@ -137,7 +137,7 @@ export default function OrderScreen() {
           </Pressable>
           <Pressable
             style={tw`flex-1 h-12 rounded-xl bg-blue-600 items-center justify-center`}
-            // onPress={() => ... thanh toán ...}
+            onPress={() => router.push({ pathname: '/(app)/table/checkout', params: { tableId: tableId as string, name, total: String(total) } })}
           >
             <Text style={tw`text-white font-bold`}>Thanh toán</Text>
           </Pressable>

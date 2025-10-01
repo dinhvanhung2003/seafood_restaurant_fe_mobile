@@ -2,9 +2,10 @@ import HeaderBar from '@components/HeaderBar';
 import { useAreas } from '@hooks/useArea';
 import { useOrders } from '@hooks/useOrder';
 import tw from '@lib/tw';
+import { useAuth } from '@providers/AuthProvider';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, FlatList, Pressable, ScrollView, Text, View } from 'react-native';
 type TableVM = {
   id: string;
   name: string;
@@ -35,8 +36,10 @@ const fmtElapsed = (iso?: string) => {
 
 export default function TablesScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
 
-  // ✅ luôn gọi hook ở top-level, không return sớm trước chúng
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  //  luôn gọi hook ở top-level, không return sớm trước chúng
   const areasQ = useAreas();
   const { orders, activeOrdersQuery } = useOrders();
 
@@ -120,7 +123,7 @@ export default function TablesScreen() {
     <View style={tw`flex-1 bg-white mt-10`}>
       {/* Header */}
         <HeaderBar
-        onMenu={() => {}}
+          onMenu={() => setDrawerOpen(true)} 
         onSearch={() => {}}
         onNotify={() => {}}
         onOrders={() => {}}
@@ -206,6 +209,108 @@ export default function TablesScreen() {
           <ActivityIndicator />
         </View>
       )}
+
+
+          <SideDrawer
+        open={drawerOpen}
+        name={'Thu ngân'}                        // có thể thay bằng tên từ profile
+        onClose={() => setDrawerOpen(false)}
+        onLogout={async () => {
+          setDrawerOpen(false);
+          await logout();
+        }}
+      />
     </View>
+  );
+}
+
+function SideDrawer({
+  open,
+  name,
+  onClose,
+  onLogout,
+}: {
+  open: boolean;
+  name?: string;
+  onClose: () => void;
+  onLogout: () => void | Promise<void>;
+}) {
+  const slide = useRef(new Animated.Value(0)).current;   // 0: đóng, 1: mở
+
+  useEffect(() => {
+    Animated.timing(slide, {
+      toValue: open ? 1 : 0,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [open]);
+
+  // chiều rộng drawer
+  const WIDTH = 280;
+
+  const translateX = slide.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-WIDTH, 0],
+  });
+  const overlayOpacity = slide.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.35],
+  });
+
+  return (
+    <>
+      {/* Overlay */}
+      {/** Dùng Pressable để tap ra ngoài đóng */}
+      <Animated.View
+        pointerEvents={open ? 'auto' : 'none'}
+        style={[
+          tw`absolute inset-0 bg-black`,
+          { opacity: overlayOpacity },
+        ]}
+      >
+        <Pressable style={tw`flex-1`} onPress={onClose} />
+      </Animated.View>
+
+      {/* Drawer panel */}
+      <Animated.View
+        style={[
+          tw`absolute top-0 bottom-0 left-0 bg-white`,
+          tw`shadow-lg`,
+          { width: WIDTH, transform: [{ translateX }] },
+        ]}
+      >
+        <View style={tw`pt-12 pb-4 px-4 border-b border-slate-100`}>
+          <Text style={tw`text-xl font-extrabold text-slate-900`}>Seafood POS</Text>
+          <Text style={tw`mt-1 text-slate-600`}>{name ?? 'Nhân viên'}</Text>
+        </View>
+
+        <View style={tw`px-2 py-3`}>
+          <DrawerItem label="Trang chủ" onPress={onClose} />
+          <DrawerItem label="Đơn hiện tại" onPress={onClose} />
+          <DrawerItem label="Cài đặt" onPress={onClose} />
+        </View>
+
+        <View style={tw`mt-auto px-4 pb-10`}>
+          <Pressable
+            onPress={onLogout}
+            style={tw`h-12 rounded-xl bg-red-500 items-center justify-center`}
+          >
+            <Text style={tw`text-white font-bold`}>Đăng xuất</Text>
+          </Pressable>
+        </View>
+      </Animated.View>
+    </>
+  );
+}
+
+function DrawerItem({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={tw`flex-row items-center h-12 px-3 rounded-lg active:bg-slate-100`}
+    >
+      <Text style={tw`text-[15px] text-slate-800`}>{label}</Text>
+    </Pressable>
   );
 }
