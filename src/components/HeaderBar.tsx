@@ -37,7 +37,7 @@ export default function HeaderBar({
               <View style={tw`w-3.5 h-3.5 rounded-full bg-green-500`} />
             </View>
           )}
-          <Text style={tw`text-xl font-extrabold text-slate-900`}>KiotViet</Text>
+          <Text style={tw`text-xl font-extrabold text-slate-900`}>Seafood</Text>
         </View>
 
         {/* Actions */}

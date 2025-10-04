@@ -1,19 +1,21 @@
-// app/(app)/table/checkout.tsx
 import { useOrders } from '@hooks/useOrder';
 import tw from '@lib/tw';
 import http from '@services/http';
-import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-    ActivityIndicator, KeyboardAvoidingView,
-    Linking,
-    Modal, Platform,
-    Pressable, ScrollView, Text, TextInput, View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
-const RT_URL = __DEV__
-  ? 'http://localhost:8000/realtime'         // chỉnh theo host BE dev
-  : 'https://your-domain.com/realtime';
+
 type PayMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'MIX' | 'VIETQR';
 
 const money = (n: number) => { try { return n.toLocaleString('vi-VN'); } catch { return String(n); } };
@@ -35,6 +37,10 @@ const RadioRow = ({ checked, label, onPress, right }:{
     {right}
   </Pressable>
 );
+
+// lấy orderId theo tableId từ hook useOrders
+const getOrderIdForTable = (map: Record<string | number, string> | undefined, tid: string | number) =>
+  (map as any)?.[tid as any] ?? (map as any)?.[String(tid)] ?? (map as any)?.[Number(tid)] ?? null;
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -70,92 +76,84 @@ export default function CheckoutScreen() {
 
   const [submitting, setSubmitting] = useState(false);
 
-  const onPay = async () => {
-    if (!canPay || !tableId) return;
-    if (method === 'VIETQR') {
-      setShowQr(true);
-      if (!qr.imgUrl) await createQrFlow();
-      return;
-    }
+  const pickCheckoutUrl = (res: any): string | undefined =>
+  res?.data?.checkoutUrl || res?.data?.data?.checkoutUrl || res?.checkoutUrl;
+
+/** mở URL an toàn + báo lỗi rõ nếu thất bại */
+const openCheckout = async (url: string) => {
+  const can = await Linking.canOpenURL(url);
+  if (!can) throw new Error('CANNOT_OPEN_CHECKOUT_URL');
+  await Linking.openURL(url);
+};
+
+const onPay = async () => {
+  if (!canPay || !tableId || submitting) return;
+
+  // --------- luồng PayOS (thay cho quét VietQR thủ công) ----------
+  if (method === 'VIETQR') {
     setSubmitting(true);
     try {
-      await pay(tableId as string, needToPay);
-      router.back();
-    } finally { setSubmitting(false); }
-  };
+      // 1) lấy orderId đang mở cho bàn
+      const oid = getOrderIdForTable(orderIds, tableId);
+      if (!oid) throw new Error('NO_OPEN_ORDER');
 
-  // ===== VietQR state + timers =====
-  const [showQr, setShowQr] = useState(false);
-  const [qr, setQr] = useState<{ imgUrl?: string; invoiceId?: string; expireAt?: string; deeplink?: string }>({});
-  const [qrLoading, setQrLoading] = useState(false);
-  const [remain, setRemain] = useState<number | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const clearTimers = () => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
-  };
-  useEffect(() => () => clearTimers(), []);
-
-  const createQrFlow = async () => {
-    if (!tableId) return;
-    try {
-      setQrLoading(true);
-
-      const oid = orderIds[tableId as string];
-      if (!oid) throw new Error('ORDER_NOT_FOUND');
-
-      // tạo invoice từ order
+      // 2) đảm bảo có invoice
       const invRes = await http.post(`/invoices/from-order/${oid}`);
       const invoiceId: string =
-        invRes.data?.id ?? invRes.data?.data?.id ?? invRes.data?.invoice?.id;
+        invRes?.data?.id ?? invRes?.data?.data?.id ?? invRes?.data?.invoice?.id;
       if (!invoiceId) throw new Error('CREATE_INVOICE_FAILED');
 
-      // gọi BE VietQR
-      const qrRes = await http.post('/payments/vietqr', {
+      // 3) tạo link PayOS ở BE (BE sẽ cấu hình returnUrl/cancelUrl + xử lý webhook)
+      const linkRes = await http.post('/payments/payos/create-link', {
         invoiceId,
-        amount: needToPay,
+        amount: needToPay,        // đảm bảo >= 2000 trên BE
+        buyerName: name || 'Guest',
       });
 
-      const imgUrl: string =
-        qrRes.data?.imgUrl || qrRes.data?.qrUrl || qrRes.data?.qr || qrRes.data?.qrImage;
-      const expireAt: string | undefined = qrRes.data?.expireAt;
-      const deeplink: string | undefined = qrRes.data?.deeplink;
-
-      setQr({ imgUrl, invoiceId, expireAt, deeplink });
-
-      if (expireAt) {
-        const calcRemain = () => Math.max(0, Math.floor((+new Date(expireAt) - Date.now()) / 1000));
-        setRemain(calcRemain());
-        tickRef.current = setInterval(() => setRemain(calcRemain()), 1000);
+      const checkoutUrl = pickCheckoutUrl(linkRes);
+      if (!checkoutUrl) {
+        console.warn('[PayOS] response:', linkRes?.data);
+        throw new Error('NO_CHECKOUT_URL');
       }
 
-      pollRef.current = setInterval(async () => {
-        try {
-          const st = await http.get('/payments/status', { params: { invoiceId } });
-          if (st.data?.status === 'PAID') {
-            clearTimers();
-            setShowQr(false);
-            router.back();
-          }
-        } catch { }
-      }, 2500);
-    } catch (e) {
-      console.warn(e);
+      // 4) mở trang checkout của PayOS
+      await openCheckout(checkoutUrl);
+
+      // 5) chuyển sang màn chờ thanh toán (socket sẽ tự dọn UI khi PAID)
+      router.push({
+        pathname: '/table/vietqr',
+        params: { invoiceId, name: name ?? '' },
+      });
+    } catch (e: any) {
+      const msg =
+        e?.response?.data?.message ||
+        e?.message ||
+        'Không tạo được link thanh toán';
+      Alert.alert('Lỗi', String(msg));
     } finally {
-      setQrLoading(false);
+      setSubmitting(false);
     }
-  };
+    return;
+  }
+
+  // --------- các phương thức nội bộ: CASH / CARD / TRANSFER / MIX ----------
+  setSubmitting(true);
+  try {
+    await pay(tableId as string, needToPay);
+    router.back();
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   return (
-    <KeyboardAvoidingView style={tw`flex-1 bg-white`} behavior={Platform.select({ ios: 'padding', android: undefined })}>
+    <KeyboardAvoidingView style={tw`flex-1 bg-white mt-10`} behavior={Platform.select({ ios: 'padding', android: undefined })}>
       {/* Header */}
       <View style={tw`px-4 py-3 border-b border-slate-200 flex-row items-center justify-between`}>
         <Pressable onPress={() => router.back()}><Text style={tw`text-xl`}>‹</Text></Pressable>
         <View style={tw`items-center`}>
           <Text style={tw`text-[16px] font-bold`}>Thanh toán</Text>
-          <Text style={tw`text-[12px] text-slate-500`}>{name ? `Bàn ${name}` : `Bàn`}</Text>
+          <Text style={tw`text-[12px] text-slate-500`}>{name ? `${name}` : `Bàn`}</Text>
         </View>
         <View style={tw`w-6`} />
       </View>
@@ -233,18 +231,18 @@ export default function CheckoutScreen() {
               }/>
           </View>
 
-          {/* VietQR */}
+          {/* VietQR (PayOS) */}
           <View style={tw`mt-2 rounded-2xl border ${method === 'VIETQR' ? 'border-blue-400' : 'border-slate-200'}`}>
             <RadioRow
               checked={method === 'VIETQR'}
-              label="Quét VietQR"
+              label="Quét VietQR (PayOS link)"
               onPress={() => setMethod('VIETQR')}
               right={
                 <Pressable
-                  onPress={() => { setShowQr(true); if (!qr.imgUrl) createQrFlow(); }}
+                  onPress={onPay}
                   style={tw`px-3 h-9 rounded-lg ${method === 'VIETQR' ? 'bg-blue-600' : 'bg-slate-200'} items-center justify-center`}
                 >
-                  <Text style={tw`${method === 'VIETQR' ? 'text-white' : 'text-slate-700'} font-medium`}>Tạo mã</Text>
+                  <Text style={tw`${method === 'VIETQR' ? 'text-white' : 'text-slate-700'} font-medium`}>Tạo link</Text>
                 </Pressable>
               }
             />
@@ -274,7 +272,7 @@ export default function CheckoutScreen() {
           style={tw.style('h-12 rounded-xl items-center justify-center', canPay ? 'bg-blue-600' : 'bg-slate-300')}>
           {submitting ? <ActivityIndicator color="#fff" /> :
             <Text style={tw`text-white font-bold`}>
-              {method === 'VIETQR' ? `Tạo mã & thanh toán: ${money(needToPay)}` : `Thanh toán: ${money(needToPay)}`}
+              {method === 'VIETQR' ? `Tạo link: ${money(needToPay)}` : `Thanh toán: ${money(needToPay)}`}
             </Text>}
         </Pressable>
         {!canPay && method !== 'VIETQR' && (
@@ -283,49 +281,6 @@ export default function CheckoutScreen() {
           </Text>
         )}
       </View>
-
-      {/* Modal QR VietQR */}
-      <Modal visible={showQr} transparent animationType="slide"
-        onRequestClose={() => { setShowQr(false); clearTimers(); }}>
-        <View style={tw`flex-1 bg-black/40 items-center justify-end`}>
-          <View style={tw`w-full bg-white rounded-t-2xl p-4`}>
-            <View style={tw`items-center`}>
-              <Text style={tw`text-base font-bold`}>Quét VietQR</Text>
-              <Text style={tw`mt-1 text-slate-600`}>Số tiền: {money(needToPay)} VND</Text>
-              {remain != null && <Text style={tw`mt-1 text-slate-500`}>Hết hạn sau: {remain}s</Text>}
-            </View>
-
-            <View style={tw`mt-3 items-center justify-center min-h-[220px]`}>
-              {qrLoading ? <ActivityIndicator /> :
-                qr.imgUrl ? <Image source={{ uri: qr.imgUrl }} style={tw`w-56 h-56`} contentFit="contain" /> :
-                <Text style={tw`text-slate-500`}>Không tạo được QR</Text>}
-            </View>
-
-            <View style={tw`mt-4 flex-row gap-3`}>
-              <Pressable onPress={() => { setShowQr(false); clearTimers(); }}
-                style={tw`flex-1 h-11 rounded-xl border border-slate-300 items-center justify-center`}>
-                <Text style={tw`text-slate-700 font-medium`}>Đóng</Text>
-              </Pressable>
-
-              {qr.deeplink ? (
-                <Pressable onPress={() => Linking.openURL(qr.deeplink!)}
-                  style={tw`flex-1 h-11 rounded-xl bg-blue-600 items-center justify-center`}>
-                  <Text style={tw`text-white font-bold`}>Mở app ngân hàng</Text>
-                </Pressable>
-              ) : (
-                <Pressable
-                  onPress={async () => {
-                    if (!qr.invoiceId) return;
-                    await http.post('/payments/mock/vietqr-success', { invoiceId: qr.invoiceId });
-                  }}
-                  style={tw`flex-1 h-11 rounded-xl bg-blue-600 items-center justify-center`}>
-                  <Text style={tw`text-white font-bold`}>Tôi đã chuyển (demo)</Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
     </KeyboardAvoidingView>
   );
 }

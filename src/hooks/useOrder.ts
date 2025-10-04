@@ -115,9 +115,11 @@ export function useOrders() {
       orderType?: 'DINE_IN' | 'TAKE_AWAY';
     }) => {
       const res = await api.post('/orders', {
+        
         orderType: payload.orderType ?? 'DINE_IN',
         ...payload,
       });
+      console.log('[FE] order created:', res.data);
       return res.data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['active-orders'] }),
