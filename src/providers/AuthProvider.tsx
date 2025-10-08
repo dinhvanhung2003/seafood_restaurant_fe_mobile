@@ -1,3 +1,4 @@
+// src/providers/AuthProvider.tsx
 import React, {
   createContext,
   useContext,
@@ -5,32 +6,46 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { showMessage } from 'react-native-flash-message';
-import { AuthAPI } from "../services/api.auth";
+import { showMessage } from "react-native-flash-message";
+import { AuthAPI, type Profile } from "../services/api.auth";
 import { tokenStore } from "../services/tokenStore";
 import type { Tokens } from "../types/types";
+
 type AuthCtx = {
   tokens: Tokens | null;
   isAuthenticated: boolean;
-  loading: boolean;
-  submitting: boolean;
+  loading: boolean;          // loading khởi động (load token/profile)
+  submitting: boolean;       // đang login
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
+  profile: Profile | null;   // <<-- THÊM VÀO
 };
 
-// 🔹 đặt tên context dễ đọc, export để dùng ở nơi khác nếu cần
 export const AuthContext = createContext<AuthCtx | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [tokens, setTokens] = useState<Tokens | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null); // <<-- THÊM VÀO
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // Khởi động: load token + profile
   useEffect(() => {
     (async () => {
-      const t = await tokenStore.load();
-      setTokens(t);
-      setLoading(false);
+      try {
+        const t = await tokenStore.load();
+        setTokens(t);
+        if (t?.accessToken) {
+          try {
+            const me = await AuthAPI.me();
+            setProfile(me);
+          } catch {
+            setProfile(null);
+          }
+        }
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -40,6 +55,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const t = await AuthAPI.login({ email, password });
       await tokenStore.save(t);
       setTokens(t);
+
+      // Sau login -> lấy profile
+      try {
+        const me = await AuthAPI.me();
+        setProfile(me);
+      } catch {
+        setProfile(null);
+      }
       return true;
     } catch (e: any) {
       const msg =
@@ -47,8 +70,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         e?.response?.data?.response?.message ||
         "Đăng nhập thất bại. Vui lòng kiểm tra lại.";
       showMessage({
-        type: 'danger',
-        message: 'Đăng nhập thất bại',
+        type: "danger",
+        message: "Đăng nhập thất bại",
         description: msg,
       });
       return false;
@@ -61,11 +84,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try { await AuthAPI.logout(); } catch {}
     await tokenStore.clear();
     setTokens(null);
+    setProfile(null); // <<-- THÊM VÀO
   };
 
   const value = useMemo<AuthCtx>(
-    () => ({ tokens, isAuthenticated: !!tokens?.accessToken, loading, submitting, login, logout }),
-    [tokens, loading, submitting]
+    () => ({
+      tokens,
+      isAuthenticated: !!tokens?.accessToken,
+      loading,
+      submitting,
+      login,
+      logout,
+      profile, // <<-- THÊM VÀO
+    }),
+    [tokens, loading, submitting, profile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

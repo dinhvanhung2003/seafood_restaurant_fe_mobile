@@ -4,8 +4,21 @@ import { useOrders } from '@hooks/useOrder';
 import tw from '@lib/tw';
 import { useAuth } from '@providers/AuthProvider';
 import { useRouter } from 'expo-router';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, FlatList, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  FlatList,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
+
+
+
 type TableVM = {
   id: string;
   name: string;
@@ -16,7 +29,11 @@ type TableVM = {
 };
 
 const fmtMoney = (n: number) => {
-  try { return n.toLocaleString('vi-VN'); } catch { return String(n); }
+  try {
+    return n.toLocaleString('vi-VN');
+  } catch {
+    return String(n);
+  }
 };
 
 const minutesBetween = (iso?: string) => {
@@ -28,7 +45,8 @@ const minutesBetween = (iso?: string) => {
 
 const fmtElapsed = (iso?: string) => {
   const m = minutesBetween(iso);
-  const h = Math.floor(m / 60), mm = m % 60;
+  const h = Math.floor(m / 60),
+    mm = m % 60;
   if (h <= 0 && mm <= 0) return '';
   if (h <= 0) return `${mm}p`;
   return `${h}g ${mm}p`;
@@ -39,7 +57,7 @@ export default function TablesScreen() {
   const { logout } = useAuth();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-  //  luôn gọi hook ở top-level, không return sớm trước chúng
+  // gọi hook ở top-level
   const areasQ = useAreas();
   const { orders, activeOrdersQuery } = useOrders();
 
@@ -69,7 +87,7 @@ export default function TablesScreen() {
     for (const a of areas ?? []) {
       for (const t of a.tables ?? []) {
         const isUsing = !!orders[t.id];
-        const amount = 0; // TODO: thay bằng tổng tiền nếu bạn có priceDict
+        const amount = 0; // TODO: nếu có tổng tiền, thay đổi ở đây
         list.push({
           id: t.id,
           name: t.name,
@@ -87,7 +105,11 @@ export default function TablesScreen() {
     return tables.filter((t) => {
       const okFloor = floor === 'Tất cả' ? true : t.floor === floor;
       const okStatus =
-        statusTab === 'all' ? true : statusTab === 'using' ? t.status === 'using' : t.status === 'empty';
+        statusTab === 'all'
+          ? true
+          : statusTab === 'using'
+          ? t.status === 'using'
+          : t.status === 'empty';
       return okFloor && okStatus;
     });
   }, [tables, floor, statusTab]);
@@ -122,13 +144,8 @@ export default function TablesScreen() {
   return (
     <View style={tw`flex-1 bg-white mt-10`}>
       {/* Header */}
-        <HeaderBar
-          onMenu={() => setDrawerOpen(true)} 
-        onSearch={() => {}}
-        onNotify={() => {}}
-        onOrders={() => {}}
-        // logoSource={require('@/assets/kiotviet.png')}
-      />
+      <HeaderBar onMenu={() => setDrawerOpen(true)} onSearch={() => {}} onNotify={() => {}} onOrders={() => {}} />
+
       <View style={tw`pt-3 pb-2 px-4`}>
         <Text style={tw`text-xl font-extrabold text-slate-900`}>Phòng bàn</Text>
       </View>
@@ -203,17 +220,16 @@ export default function TablesScreen() {
         }
       />
 
-      {/* Loading overlay (thay cho return sớm) */}
+      {/* Loading overlay */}
       {areasQ.isLoading && (
         <View style={tw`absolute inset-0 items-center justify-center bg-white/60`}>
           <ActivityIndicator />
         </View>
       )}
 
-
-          <SideDrawer
+      <SideDrawer
         open={drawerOpen}
-        name={'Thu ngân'}                        // có thể thay bằng tên từ profile
+        name={'Thu ngân'}
         onClose={() => setDrawerOpen(false)}
         onLogout={async () => {
           setDrawerOpen(false);
@@ -235,7 +251,8 @@ function SideDrawer({
   onClose: () => void;
   onLogout: () => void | Promise<void>;
 }) {
-  const slide = useRef(new Animated.Value(0)).current;   // 0: đóng, 1: mở
+  const slide = useRef(new Animated.Value(0)).current; // 0: đóng, 1: mở
+  const router = useRouter();
 
   useEffect(() => {
     Animated.timing(slide, {
@@ -246,40 +263,19 @@ function SideDrawer({
     }).start();
   }, [open]);
 
-  // chiều rộng drawer
   const WIDTH = 280;
-
-  const translateX = slide.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-WIDTH, 0],
-  });
-  const overlayOpacity = slide.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 0.35],
-  });
+  const translateX = slide.interpolate({ inputRange: [0, 1], outputRange: [-WIDTH, 0] });
+  const overlayOpacity = slide.interpolate({ inputRange: [0, 1], outputRange: [0, 0.35] });
 
   return (
     <>
-      {/* Overlay */}
-      {/** Dùng Pressable để tap ra ngoài đóng */}
-      <Animated.View
-        pointerEvents={open ? 'auto' : 'none'}
-        style={[
-          tw`absolute inset-0 bg-black`,
-          { opacity: overlayOpacity },
-        ]}
-      >
+      {/* Overlay tap để đóng */}
+      <Animated.View pointerEvents={open ? 'auto' : 'none'} style={[tw`absolute inset-0 bg-black`, { opacity: overlayOpacity }]}>
         <Pressable style={tw`flex-1`} onPress={onClose} />
       </Animated.View>
 
-      {/* Drawer panel */}
-      <Animated.View
-        style={[
-          tw`absolute top-0 bottom-0 left-0 bg-white`,
-          tw`shadow-lg`,
-          { width: WIDTH, transform: [{ translateX }] },
-        ]}
-      >
+      {/* Panel */}
+      <Animated.View style={[tw`absolute top-0 bottom-0 left-0 bg-white shadow-lg`, { width: WIDTH, transform: [{ translateX }] }]}>
         <View style={tw`pt-12 pb-4 px-4 border-b border-slate-100`}>
           <Text style={tw`text-xl font-extrabold text-slate-900`}>Seafood POS</Text>
           <Text style={tw`mt-1 text-slate-600`}>{name ?? 'Nhân viên'}</Text>
@@ -289,27 +285,35 @@ function SideDrawer({
           <DrawerItem label="Trang chủ" onPress={onClose} />
           <DrawerItem label="Đơn hiện tại" onPress={onClose} />
           <DrawerItem label="Cài đặt" onPress={onClose} />
-        </View>
 
-        <View style={tw`mt-auto px-4 pb-10`}>
-          <Pressable
-            onPress={onLogout}
-            style={tw`h-12 rounded-xl bg-red-500 items-center justify-center`}
-          >
-            <Text style={tw`text-white font-bold`}>Đăng xuất</Text>
-          </Pressable>
+         <DrawerItem
+  label="Chấm công"
+  onPress={() => {
+    onClose();
+router.push({ pathname: '/(app)/profile/atttendance' } as never);
+
+  }}
+/>
+<DrawerItem
+  label="Bảng chấm công"
+  onPress={() => {
+    onClose();
+    router.push({ pathname: "/(app)/profile/atttendance/list" } as never);
+  }}
+/>
+
+          <DrawerItem label="Đổi mật khẩu" onPress={onClose} />
+          <DrawerItem label="Đăng xuất" onPress={onLogout} />
         </View>
       </Animated.View>
+
     </>
   );
 }
 
 function DrawerItem({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={tw`flex-row items-center h-12 px-3 rounded-lg active:bg-slate-100`}
-    >
+    <Pressable onPress={onPress} style={tw`flex-row items-center h-12 px-3 rounded-lg active:bg-slate-100`}>
       <Text style={tw`text-[15px] text-slate-800`}>{label}</Text>
     </Pressable>
   );
