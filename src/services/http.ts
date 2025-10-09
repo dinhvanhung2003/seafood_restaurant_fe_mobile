@@ -2,8 +2,8 @@ import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 import { tokenStore } from "./tokenStore";
 
 
-const BASE_URL = process.env.BASE_URL || "http://172.21.144.1:8000";
-
+const BASE_URL = process.env.EXPO_PUBLIC_BASE_URL || "http://192.168.0.214:8000";
+console.log("BASE_URL", BASE_URL);
 const http: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   timeout: 20000,
