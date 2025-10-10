@@ -301,7 +301,13 @@ router.push({ pathname: '/(app)/profile/atttendance' } as never);
     router.push({ pathname: "/(app)/profile/atttendance/list" } as never);
   }}
 />
-
+<DrawerItem
+  label="Đăng ký khuôn mặt"
+  onPress={() => {
+    onClose();
+    router.push({ pathname: "/(app)/profile/face" } as never);
+  }}
+/>
           <DrawerItem label="Đổi mật khẩu" onPress={onClose} />
           <DrawerItem label="Đăng xuất" onPress={onLogout} />
         </View>

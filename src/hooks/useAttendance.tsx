@@ -45,18 +45,22 @@ export type AttendanceCheckPayload = {
   accuracy: number;
   clientTs: number;
   netType: string;
-  checkType: CheckType;
-  scheduleId: string;      // quan trọng
+  checkType: "IN" | "OUT";
+  scheduleId: string;
+  imageBase64: string; // <<< thêm
 };
 
 export type AttendanceCheckResp = {
   ok: boolean;
-  verify: "PASS" | "FAIL_GPS" | "FAIL_WIFI" | "FAIL_RULE";
+  verify: "PASS" | "FAIL_GPS" | "FAIL_WIFI" | "FAIL_RULE" | "FAIL_FACE";
   serverTime: string;
 };
 
 export async function postAttendanceCheck(payload: AttendanceCheckPayload) {
-  const res = await http.post<AttendanceCheckResp>("/mobile/attendance/check", payload);
+  const res = await http.post<AttendanceCheckResp>(
+    "/mobile/attendance/check-with-face", // <<< đổi route
+    payload
+  );
   return res.data;
 }
 

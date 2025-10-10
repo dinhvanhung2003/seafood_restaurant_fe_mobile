@@ -4,84 +4,90 @@ import * as Network from "expo-network";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Platform, Text, TouchableOpacity, View } from "react-native";
 import tw from "twrnc";
+import FaceModal from "./FaceModal";
 
 import type { CheckType } from "@hooks/useAttendance";
 import { useAttendanceCheck, useTodayShifts } from "@hooks/useAttendance";
 import { useAuth } from "@providers/AuthProvider";
+import { getFaceStatus } from "@services/face";
 
 const toYMD = (d = new Date()) => d.toISOString().slice(0, 10);
 const nowHHmm = (d = new Date()) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 export default function MobileAttendanceScreen() {
   const { profile } = useAuth();
+
+  // Đồng hồ
   const [now, setNow] = useState(new Date());
-  const fade = useRef(new Animated.Value(0)).current;
-
-  const { data: shifts = [], isLoading, refetch } = useTodayShifts(toYMD());
-  const [selectedScheduleId, setSelectedScheduleId] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (shifts.length && !selectedScheduleId) setSelectedScheduleId(shifts[0].scheduleId);
-  }, [shifts, selectedScheduleId]);
-
-  // đồng hồ
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   const hhmm = useMemo(() => nowHHmm(now), [now]);
 
+  // Ca làm việc
+  const { data: shifts = [], isLoading, refetch } = useTodayShifts(toYMD());
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | undefined>(undefined);
+  useEffect(() => { if (shifts.length && !selectedScheduleId) setSelectedScheduleId(shifts[0].scheduleId); }, [shifts, selectedScheduleId]);
+
+  // Toast
   const [toast, setToast] = useState<string | null>(null);
+  const fade = useRef(new Animated.Value(0)).current;
   function showToast(msg: string) {
     setToast(msg);
     fade.setValue(0);
     Animated.timing(fade, { toValue: 1, duration: 150, useNativeDriver: true }).start(() =>
       setTimeout(() => {
-        Animated.timing(fade, { toValue: 0, duration: 150, useNativeDriver: true }).start(() =>
-          setToast(null)
-        );
+        Animated.timing(fade, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => setToast(null));
       }, 2200)
     );
   }
 
+  // API chấm công
   const { mutateAsync: checkAttendance, isPending } = useAttendanceCheck();
+
+  // Modal khuôn mặt
+  const [faceOpen, setFaceOpen] = useState(false);
+  const faceB64Ref = useRef<string | null>(null);
+
+  // Thành công
   const [success, setSuccess] = useState<{ type: CheckType; time: string } | null>(null);
 
-  async function handleCheck(type: CheckType) {
-    if (!selectedScheduleId) {
-      showToast("Hôm nay bạn không có ca được phân.");
-      return;
-    }
+  const noShift = (shifts?.length ?? 0) === 0;
 
-    // 1) Bật location service?
+  async function handleCheck(type: CheckType) {
+    if (!selectedScheduleId) { showToast("Hôm nay bạn không có ca được phân."); return; }
+
+    // Bắt buộc đã đăng ký khuôn mặt
+    const st = await getFaceStatus().catch(() => null);
+    if (!st?.enrolled) { showToast("Bạn chưa đăng ký khuôn mặt."); return; }
+
+    // 0) Chụp khuôn mặt
+    faceB64Ref.current = null;
+    setFaceOpen(true);
+    for (let i = 0; i < 50; i++) { await new Promise(r => setTimeout(r, 100)); if (faceB64Ref.current) break; }
+    if (!faceB64Ref.current) { showToast("Bạn chưa chụp khuôn mặt."); return; }
+
+    // 1) Location service
     const enabled = await Location.hasServicesEnabledAsync();
     if (!enabled) { showToast("Hãy bật Dịch vụ vị trí."); return; }
 
     // 2) Quyền vị trí
     const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
     if (status !== Location.PermissionStatus.GRANTED) {
-      showToast(canAskAgain ? "Hãy cho phép quyền vị trí." : "Ứng dụng chưa có quyền vị trí.");
-      return;
+      showToast(canAskAgain ? "Hãy cho phép quyền vị trí." : "Ứng dụng chưa có quyền vị trí."); return;
     }
 
-    // 3) Vị trí
+    // 3) Lấy vị trí
     let pos: Location.LocationObject | null = null;
     try {
-      pos = await Location.getCurrentPositionAsync({
-        accuracy: Platform.OS === "android" ? Location.Accuracy.Balanced : Location.Accuracy.Balanced,
-        mayShowUserSettingsDialog: true,
-      });
+      pos = await Location.getCurrentPositionAsync({ accuracy: Platform.OS === "android" ? Location.Accuracy.Balanced : Location.Accuracy.Balanced, mayShowUserSettingsDialog: true });
     } catch {
       pos = await Location.getLastKnownPositionAsync();
     }
     if (!pos) { showToast("Không lấy được vị trí."); return; }
 
-    // 4) Mạng
+    // 4) Network
     const net = await Network.getNetworkStateAsync();
-    const isConnected = !!net.isConnected;
-    if (!isConnected) { showToast("Thiết bị đang offline."); return; }
-    const netType = `${net.type ?? "unknown"}${isConnected ? "" : "_offline"}`;
+    if (!net.isConnected) { showToast("Thiết bị đang offline."); return; }
+    const netType = `${net.type ?? "unknown"}`;
 
     // 5) Gọi API
     try {
@@ -93,19 +99,18 @@ export default function MobileAttendanceScreen() {
         netType,
         checkType: type,
         scheduleId: selectedScheduleId,
-      });
+        imageBase64: faceB64Ref.current!,
+      } as any);
 
-      if (result.ok) {
+      if (result?.ok) {
         setSuccess({
           type,
-          time:
-            now.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) +
-            " " +
-            now.toLocaleDateString("vi-VN"),
+          time: now.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) + " " + now.toLocaleDateString("vi-VN"),
         });
         refetch();
-      } else if (result.verify === "FAIL_GPS") showToast("❌ Không ở trong vùng GPS.");
-      else if (result.verify === "FAIL_WIFI") showToast("❌ Không đúng Wi-Fi/IP.");
+      } else if (result?.verify === "FAIL_FACE") showToast("❌ Không khớp khuôn mặt.");
+      else if (result?.verify === "FAIL_GPS") showToast("❌ Không ở trong vùng GPS.");
+      else if (result?.verify === "FAIL_WIFI") showToast("❌ Không đúng Wi-Fi/IP.");
       else showToast("❌ Không hợp lệ.");
     } catch (e: any) {
       const s = e?.response?.status;
@@ -113,8 +118,6 @@ export default function MobileAttendanceScreen() {
       showToast(`⚠️ Lỗi ${s ?? ""} ${Array.isArray(m) ? m.join(", ") : m}`);
     }
   }
-
-  const noShift = (shifts?.length ?? 0) === 0;
 
   return (
     <View style={tw`flex-1 bg-white pt-8 px-4`}>
@@ -137,12 +140,8 @@ export default function MobileAttendanceScreen() {
             {noShift ? (
               <Picker.Item label="Hôm nay bạn không có ca" value={undefined} />
             ) : (
-              shifts.map((sh) => (
-                <Picker.Item
-                  key={sh.scheduleId}
-                  label={`${sh.name} (${sh.start}–${sh.end})`}
-                  value={sh.scheduleId}
-                />
+              shifts.map((sh: any) => (
+                <Picker.Item key={sh.scheduleId} label={`${sh.name} (${sh.start}–${sh.end})`} value={sh.scheduleId} />
               ))
             )}
           </Picker>
@@ -153,22 +152,20 @@ export default function MobileAttendanceScreen() {
       <View style={tw`flex-row gap-3 mt-4`}>
         <TouchableOpacity
           style={tw.style(
-            `flex-1 h-14 rounded-xl items-center justify-center`,
-            `bg-blue-600`,
+            `flex-1 h-14 rounded-xl items-center justify-center bg-blue-600`,
             (isPending || noShift) && `opacity-60`
           )}
-          onPress={() => handleCheck("IN")}
+          onPress={() => handleCheck("IN" as CheckType)}
           disabled={isPending || noShift}
         >
           <Text style={tw`text-white text-lg font-semibold`}>Vào</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={tw.style(
-            `flex-1 h-14 rounded-xl items-center justify-center`,
-            `border border-slate-200 bg-white`,
+            `flex-1 h-14 rounded-xl items-center justify-center border border-slate-200 bg-white`,
             (isPending || noShift) && `opacity-60`
           )}
-          onPress={() => handleCheck("OUT")}
+          onPress={() => handleCheck("OUT" as CheckType)}
           disabled={isPending || noShift}
         >
           <Text style={tw`text-slate-900 text-lg font-semibold`}>Ra</Text>
@@ -177,10 +174,22 @@ export default function MobileAttendanceScreen() {
 
       {/* Toast mini */}
       {toast ? (
-        <Animated.View style={[tw`absolute left-5 right-5 bottom-7 rounded-xl px-4 py-2`, { backgroundColor: "rgba(0,0,0,0.85)", opacity: fade }]}>
+        <Animated.View
+          style={[
+            tw`absolute left-5 right-5 bottom-7 rounded-xl px-4 py-2`,
+            { backgroundColor: "rgba(0,0,0,0.85)", opacity: fade },
+          ]}
+        >
           <Text style={tw`text-white text-center`}>{toast}</Text>
         </Animated.View>
       ) : null}
+
+      {/* Modal chụp khuôn mặt */}
+      <FaceModal
+        visible={faceOpen}
+        onClose={() => setFaceOpen(false)}
+        onShot={(b64) => { faceB64Ref.current = b64; setFaceOpen(false); }}
+      />
 
       {/* Modal xác nhận */}
       {success && (
