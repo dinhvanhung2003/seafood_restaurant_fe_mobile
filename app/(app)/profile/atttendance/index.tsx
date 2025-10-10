@@ -11,7 +11,12 @@ import { useAttendanceCheck, useTodayShifts } from "@hooks/useAttendance";
 import { useAuth } from "@providers/AuthProvider";
 import { getFaceStatus } from "@services/face";
 
-const toYMD = (d = new Date()) => d.toISOString().slice(0, 10);
+const toYMD = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 const nowHHmm = (d = new Date()) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 export default function MobileAttendanceScreen() {
