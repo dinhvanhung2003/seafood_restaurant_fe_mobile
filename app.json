@@ -5,9 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-
-    "scheme": "seafoodapp",                    // deep link scheme
-
+    "scheme": "seafoodapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -15,21 +13,12 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourco.pos"   // tuỳ bạn đặt
+      "bundleIdentifier": "com.yourco.pos"
     },
-
     "android": {
-      "package": "com.yourco.pos",           // đặt mã gói của bạn
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "category": ["BROWSABLE", "DEFAULT"],
-          "data": [{ "scheme": "mypos" }]
-        }
-      ],
+      "package": "com.yourco.pos",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -37,14 +26,28 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
-
     "web": {
       "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-
-    "plugins": ["expo-router"],
-    "experiments": { "typedRoutes": true }
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6d1688c1-5b1c-4d56-bc73-cfe5c5d721bc"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6d1688c1-5b1c-4d56-bc73-cfe5c5d721bc"
+    }
   }
 }
