@@ -51,11 +51,7 @@ export default function LoginScreen() {
       behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
       <View style={tw`flex-1 px-5 justify-center`}>
-        <Text style={tw`text-2xl font-bold text-gray-900 mb-2`}>Đăng nhập</Text>
-        <Text style={tw`text-gray-500 mb-6`}>
-          Chỉ nhân viên có quyền <Text style={tw`font-semibold`}>WAITER</Text> mới truy cập được ứng dụng.
-        </Text>
-
+        <Text style={tw`text-2xl font-bold text-gray-900 mb-2 text-center`}>Đăng nhập</Text>
         <View style={tw`mb-3`}>
           <Text style={tw`mb-2 text-sm text-gray-600`}>Tên đăng nhập</Text>
           <TextInput

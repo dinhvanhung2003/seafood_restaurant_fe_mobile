@@ -54,7 +54,7 @@ const makeBatchId = () => {
 async function fetchOrders() {
   // BE nên trả về danh sách order đang active (khác PAID/CANCELLED)
   const res = await api.get('/orders', {
-    params: { page: 1, limit: 200, excludeStatus: 'PAID,CANCELLED' },
+    params: { page: 1, limit: 200, excludeStatus: 'PAID,CANCELLED,MERGED' },
   });
   const json = res.data;
   // tuỳ BE, bạn có thể chỉnh lại access data

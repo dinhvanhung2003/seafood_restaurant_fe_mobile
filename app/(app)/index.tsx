@@ -176,7 +176,7 @@ export default function TablesScreen() {
       </View>
 
       {/* Floor chips */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={tw`px-4 pb-3 gap-2`}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={tw`px-4 pb-3 mb-2 gap-2`}>
         {floorOptions.map((f) => {
           const active = floor === f;
           return (

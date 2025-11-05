@@ -92,7 +92,7 @@ export default function TableMenuScreen() {
       {/* Header */}
       <View style={tw`px-4 py-3 bg-white border-b border-slate-100 flex-row items-center justify-between`}>
         <Pressable onPress={() => router.back()}><Text style={tw`text-xl`}>‹</Text></Pressable>
-        <Text style={tw`text-base font-bold`}>{name ? `Bàn ${name}` : 'Bàn'}</Text>
+        <Text style={tw`text-base font-bold`}>{name ? ` ${name}` : 'Bàn'}</Text>
         <View style={tw`w-6`} />
       </View>
 

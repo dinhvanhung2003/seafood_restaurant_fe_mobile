@@ -2,8 +2,8 @@ import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 import { tokenStore } from "./tokenStore";
 
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || "https://seafoodrestaurantbe-production.up.railway.app";
-
+const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+console.log("API BASE URL:", BASE_URL);
 const http: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   timeout: 20000,
