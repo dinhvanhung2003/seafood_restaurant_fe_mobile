@@ -79,31 +79,51 @@ export function useOrders() {
   });
 
   // Đồng bộ dữ liệu server -> state UI
+    const [amountByTable, setAmountByTable] = useState<Record<string, number>>({}); // NEW
+
   useEffect(() => {
-    const rows = activeOrdersQuery.data ?? [];
+  const rows = activeOrdersQuery.data ?? [];
 
-    const nextOrders: OrdersByTable = {};
-    const nextOrderIds: Record<string, string> = {};
+  const nextOrders: OrdersByTable = {};
+  const nextOrderIds: Record<string, string> = {};
+  const nextAmountByTable: Record<string, number> = {}; // <— NEW
 
-    for (const o of rows) {
-      const tid = o.table?.id ?? o.tableId;
-      if (!tid) continue;
+  const toNum = (v: any) => {
+    const n = typeof v === 'string' ? parseFloat(v) : Number(v ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  };
 
-      nextOrderIds[tid] = o.id;
+  for (const o of rows) {
+    const tid = o.table?.id ?? o.tableId;
+    if (!tid) continue;
 
-      const items: UIOrderItem[] = (o.items ?? []).map((it: any) => ({
-        id: it.menuItem?.id ?? it.menuItemId,
-        qty: it.quantity,
-        rowId: it.id, // chính là orderItemId
-      }));
+    nextOrderIds[tid] = o.id;
 
-      const tabId = _uid();
-      nextOrders[tid] = { activeId: tabId, orders: [{ id: tabId, label: '1', items }] };
-    }
+    // map items cho UI
+    const items: UIOrderItem[] = (o.items ?? []).map((it: any) => ({
+      id: it.menuItem?.id ?? it.menuItemId,
+      qty: it.quantity,
+      rowId: it.id,
+    }));
 
-    setOrders(nextOrders);
-    setOrderIds(nextOrderIds);
-  }, [activeOrdersQuery.data]);
+    const tabId = Math.random().toString(36).slice(2, 9);
+    nextOrders[tid] = { activeId: tabId, orders: [{ id: tabId, label: '1', items }] };
+
+    // ✅ tính tổng tiền
+    const total = (o.items ?? []).reduce((sum: number, it: any) => {
+      const qty = toNum(it.quantity);
+      const price = toNum(it.price ?? it.menuItem?.price ?? 0);
+      return sum + qty * price;
+    }, 0);
+
+    nextAmountByTable[tid] = total; // <— lưu tổng tiền
+  }
+
+  setOrders(nextOrders);
+  setOrderIds(nextOrderIds);
+  setAmountByTable(nextAmountByTable); // <— NEW
+}, [activeOrdersQuery.data]);
+
 
   /* ----------------------- Mutations (server) ----------------------- */
 
@@ -373,7 +393,7 @@ export function useOrders() {
     activeOrdersQuery,
     orders,
     orderIds,
-
+ amountByTable, // NEW
     // actions
     addOne,
     addMany,
@@ -383,5 +403,6 @@ export function useOrders() {
     confirm,
     pay: payByCash,
     cancel,
+    
   };
 }

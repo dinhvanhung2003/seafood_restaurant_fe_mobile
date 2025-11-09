@@ -1,17 +1,16 @@
 // apps/mobile/app/(app)/table/order.tsx
-import { useKitchenHistory } from "@hooks/useKitchenHistory";
+import { useKitchenFlow } from '@hooks/notification/useKitchenFlow';
+import { useCancelSocketLive } from '@hooks/socket/socket/useCancelSocket';
 import { useKitchenProgress } from "@hooks/useKitchenProgress";
 import { useMenu } from "@hooks/useMenu";
 import { useOrders } from "@hooks/useOrder";
 import tw from "@lib/tw";
-import http from "@services/http";
 import { useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo, useState } from "react";
-import { Alert, FlatList, Pressable, Text, View } from "react-native";
-// import { useKitchenSocketLive } from "../../../src/hooks/socket/socket/useKitchenSocketLive";
-// import { useOrderSocketLive } from "../../../src/hooks/socket/socket/useOrderSocketLive";
+import { useMemo } from "react";
+import { FlatList, Pressable, Text, View } from "react-native";
+import CancelOneItemModal from "../../../src/components/modal/CancelOneItemModal";
 import { usePosSocketLive } from "../../../src/hooks/socket/socket/useSocket";
 //  helper kiểm tra UUID v4
 const isUuid = (s?: string) =>
@@ -31,9 +30,7 @@ export default function OrderScreen() {
   const orderRow = orders[tableId as string]?.orders?.[0];
   const items: Array<{ id: string; qty: number; rowId?: string }> = orderRow?.items ?? [];
 
-  // ✅ Dùng UUID thật từ BE
-  const currentOrderId = orderIds[tableId as string];
-
+ 
   // ===== Meta món =====
   const menuQ = useMenu({ page: 1, limit: 500, search: "", categoryId: "all" });
   const menuMap = useMemo(() => {
@@ -55,83 +52,41 @@ export default function OrderScreen() {
     [items, menuMap]
   );
 
-// socket cho các chức năng của order
-// useOrderSocketLive(currentOrderId);
 
-  // ===== Tiến độ đã báo bếp (để tính delta) =====
-  const { data: progress = [] } = useKitchenProgress(currentOrderId);
-  useKitchenHistory(currentOrderId);
+const {
+  currentOrderId,
+  canNotify,
+  notifying,
+  onChangeQty,          // dùng thay cho changeQty
+  onNotify,             // dùng thay cho onNotify tự viết
+  cancelOneOpen,
+  cancelOne,
+  setCancelOneOpen,
+  confirmCancelOne,
+} = useKitchenFlow(tableId as string);
 
-  const notifiedMap = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of progress) m.set(r.menuItemId, r.notified);
-    return m;
-  }, [progress]);
+// ✅ thêm lại dòng này để có 'progress'
+const { data: progress = [] } = useKitchenProgress(currentOrderId);
 
-  const deltaItems = useMemo(
-    () =>
-      items
-        .map((i) => {
-          const sent = notifiedMap.get(i.id) ?? 0;
-          return { menuItemId: i.id, delta: Math.max(0, i.qty - sent) };
-        })
-        .filter((d) => d.delta > 0),
-    [items, notifiedMap]
-  );
-
-  // ✅ Chỉ cho phép gửi khi orderId là UUID hợp lệ và có delta
-  const canNotify = isUuid(currentOrderId) && deltaItems.length > 0;
-  const [notifying, setNotifying] = useState(false);
-
-  // ===== Gửi bếp =====
-  const onNotify = async () => {
-    if (!isUuid(currentOrderId)) {
-      Alert.alert("Thông báo", "Chưa có order hợp lệ cho bàn này.");
-      return;
-    }
-    if (!canNotify || notifying) return;
-
-    setNotifying(true);
-    try {
-      await http.post(`/kitchen/orders/${currentOrderId}/notify-items`, {
-        items: deltaItems,            // [{ menuItemId, delta }]
-        priority: true,
-        tableName: name || String(tableId),
-      });
-
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["kitchen-progress", currentOrderId] }),
-        qc.invalidateQueries({ queryKey: ["kitchen-history", currentOrderId] }),
-      ]);
-
-      Alert.alert("Thành công", "Đã gửi bếp!");
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || "Không thể gửi bếp";
-      Alert.alert("Lỗi", msg);
-    } finally {
-      setNotifying(false);
-    }
-  };
-  // ===== Tiến độ đã báo bếp =====
-// useKitchenSocketLive(currentOrderId);
+// (tuỳ) realtime
 usePosSocketLive(currentOrderId);
+ useCancelSocketLive(currentOrderId);
+
   // menuItemId -> counts
   const progressMap = useMemo(() => {
-    const m = new Map<
-      string,
-      { notified: number; preparing: number; ready: number; served: number; cooked: number }
-    >();
-    for (const r of progress) {
-      m.set(r.menuItemId, {
-        notified: r.notified,
-        preparing: r.preparing,
-        ready: r.ready,
-        served: r.served,
-        cooked: r.cooked,
-      });
-    }
-    return m;
-  }, [progress]);
+  const m = new Map<string, { notified: number; preparing: number; ready: number; served: number; cooked: number }>();
+  for (const r of progress) {
+    m.set(r.menuItemId, {
+      notified: r.notified,
+      preparing: r.preparing,
+      ready: r.ready,
+      served: r.served,
+      cooked: r.cooked,
+    });
+  }
+  return m;
+}, [progress]);
+
   // ===== Render =====
   const renderItem = ({ item }: { item: { id: string; qty: number; rowId?: string } }) => {
     const meta = menuMap.get(item.id);
@@ -166,19 +121,19 @@ const p = progressMap.get(item.id) ?? {
 
           {/* cụm số lượng */}
           <View style={tw`flex-row items-center`}>
-            <Pressable
-              onPress={() => changeQty(tableId as string, item.id, -1, items)}
-              style={tw`h-9 w-9 rounded-full bg-slate-100 items-center justify-center`}
-            >
-              <Text style={tw`text-xl`}>−</Text>
-            </Pressable>
+          <Pressable
+  onPress={() => onChangeQty(item.id, -1)}   // ✅ thay
+  style={tw`h-9 w-9 rounded-full bg-slate-100 items-center justify-center`}
+>
+  <Text style={tw`text-xl`}>−</Text>
+</Pressable>
             <Text style={tw`mx-3 w-6 text-center font-semibold`}>{item.qty}</Text>
-            <Pressable
-              onPress={() => changeQty(tableId as string, item.id, +1, items)}
-              style={tw`h-9 w-9 rounded-full bg-slate-100 items-center justify-center`}
-            >
-              <Text style={tw`text-xl`}>＋</Text>
-            </Pressable>
+          <Pressable
+  onPress={() => onChangeQty(item.id, +1)}   // ✅ thay
+  style={tw`h-9 w-9 rounded-full bg-slate-100 items-center justify-center`}
+>
+  <Text style={tw`text-xl`}>＋</Text>
+</Pressable>
           </View>
         </View>
       </View>
@@ -235,14 +190,15 @@ const p = progressMap.get(item.id) ?? {
 
         <View style={tw`flex-row gap-3`}>
           <Pressable
-            onPress={onNotify}
-            disabled={!canNotify || notifying}
-            style={tw`flex-1 h-12 rounded-xl border border-blue-600 items-center justify-center ${(!canNotify || notifying) ? "opacity-50" : ""}`}
-          >
-            <Text style={tw`text-blue-600 font-bold`}>
-              {notifying ? "Đang gửi..." : "Thông báo"}
-            </Text>
-          </Pressable>
+  onPress={() => onNotify(name || String(tableId))}   // ✅
+  disabled={!canNotify || notifying}
+  style={tw`flex-1 h-12 rounded-xl border border-blue-600 items-center justify-center ${(!canNotify || notifying) ? "opacity-50" : ""}`}
+>
+  <Text style={tw`text-blue-600 font-bold`}>
+    {notifying ? "Đang gửi..." : "Thông báo"}
+  </Text>
+</Pressable>
+
           <Pressable
             style={tw`flex-1 h-12 rounded-xl bg-blue-600 items-center justify-center`}
             onPress={() =>
@@ -256,9 +212,20 @@ const p = progressMap.get(item.id) ?? {
           </Pressable>
         </View>
       </View>
+      <CancelOneItemModal
+  open={cancelOneOpen}
+  item={cancelOne}
+  onClose={() => setCancelOneOpen(false)}
+  onConfirm={confirmCancelOne}
+/>
     </View>
+    
   );
 }
+
+
+
+
 
 function Chip({ label }: { label: string }) {
   return (
