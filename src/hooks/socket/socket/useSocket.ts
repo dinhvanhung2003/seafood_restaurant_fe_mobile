@@ -31,7 +31,16 @@ export function usePosSocketLive(orderId?: string) {
     const onChanged = (p: { orderId: string }) => refetchOrder(p.orderId);
     const onMerged  = () => refetchOrder(orderId);
     const onSplit   = () => refetchOrder(orderId);
+const onMetaUpdated = (p: {
+      orderId: string;
+      tableId: string;
+      guestCount: number | null;
+      customer: { id: string; name: string; phone?: string | null } | null;
+    }) => {
+      qc.invalidateQueries({ queryKey: ['active-orders'] });
+    };
 
+    s.on('orders:meta_updated', onMetaUpdated);
     s.on("orders:changed", onChanged);
     s.on("orders:merged",  onMerged);
     s.on("orders:split",   onSplit);
@@ -54,6 +63,7 @@ export function usePosSocketLive(orderId?: string) {
       s.off("orders:split",   onSplit);
       s.off("kitchen:ticket_status_changed", onKitchenChanged);
       s.off("kitchen:new_batch", onNewBatch);
+        s.off('orders:meta_updated', onMetaUpdated);
     };
   }, [orderId, qc]);
 }

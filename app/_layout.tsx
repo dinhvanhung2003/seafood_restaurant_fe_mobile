@@ -6,13 +6,17 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import FlashMessage from 'react-native-flash-message';
 import '../global.css';
-
+import { getSocket } from '../src/lib/socket';
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading /*, role*/ } = useAuth();
   const segments = useSegments();            // ví dụ: ["(auth)", "login"] hoặc ["(app)"]
   const router = useRouter();
-
+    useEffect(() => {
+    const s = getSocket();            // QUAN TRỌNG: bắt đầu kết nối ở entry
+    s.emit('room:join', 'kitchen');   // để BE log "joined room"
+    return () => { try { s.close(); } catch {} };
+  }, []);
   useEffect(() => {
     if (loading) return;
 

@@ -1,13 +1,8 @@
 // src/hooks/useOrders.ts
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
-
-// ✅ axios instance của bạn (đổi đường dẫn cho đúng)
 import api from '@services/http';
-// hoặc: import { api } from '@lib/axios';
-
-// ✅ flash-message helper (xem file mẫu ở dưới)
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { notify } from '@utils/notify';
+import { useEffect, useState } from 'react';
 
 /* ======================== Types tối thiểu dùng cho UI ======================= */
 
@@ -21,15 +16,20 @@ export type ItemStatus =
   | 'CANCELLED';
 
 export type UIOrderItem = {
-  id: string;          // menuItemId
-  qty: number;         // số lượng hiển thị trên UI
-  rowId?: string;      // orderItemId (nếu đã có trên server)
+  id: string;          
+  qty: number;
+  rowId?: string;     
 };
-
 export type UIOrderTab = {
-  id: string;          // internal id tab (UI)
-  label: string;       // "1", "2", ...
+  id: string;         
+  label: string;      
   items: UIOrderItem[];
+  guestCount?: number | null;
+  customer?: {
+    id: string;
+    name: string;
+    phone?: string | null;
+  } | null;
 };
 
 export type OrdersByTable = Record<
@@ -107,9 +107,25 @@ export function useOrders() {
     }));
 
     const tabId = Math.random().toString(36).slice(2, 9);
-    nextOrders[tid] = { activeId: tabId, orders: [{ id: tabId, label: '1', items }] };
 
-    // ✅ tính tổng tiền
+ //  GOM META TỪ BE VÀO TAB
+    const tab: UIOrderTab = {
+      id: tabId,
+      label: '1',
+      items,
+      guestCount: o.guestCount ?? 0,
+      customer: o.customer
+        ? {
+            id: o.customer.id,
+            name: o.customer.name,
+            phone: o.customer.phone ?? null,
+          }
+        : null,
+    };
+
+    nextOrders[tid] = { activeId: tabId, orders: [tab] };
+
+    // tính tổng tiền
     const total = (o.items ?? []).reduce((sum: number, it: any) => {
       const qty = toNum(it.quantity);
       const price = toNum(it.price ?? it.menuItem?.price ?? 0);
@@ -192,7 +208,26 @@ export function useOrders() {
       if (data?.ok) qc.invalidateQueries({ queryKey: ['active-orders'] });
     },
   });
+const updateMetaMu = useMutation({
+  mutationFn: async (arg: {
+    orderId: string;
+    body: { guestCount?: number; customerId?: string | null };
+  }) => {
+    const res = await api.patch(`/orders/${arg.orderId}/meta`, arg.body);
+    return res.data;
+  },
+  onSuccess: () => {
+    qc.invalidateQueries({ queryKey: ['active-orders'] });
+  },
+});
 
+// helper để screen dùng
+async function updateOrderMeta(
+  orderId: string,
+  body: { guestCount?: number; customerId?: string | null }
+) {
+  await updateMetaMu.mutateAsync({ orderId, body });
+}
   // Cập nhật trạng thái order (soft confirm, v.v.)
   const updateStatusMu = useMutation({
     mutationFn: async (arg: {
@@ -403,6 +438,6 @@ export function useOrders() {
     confirm,
     pay: payByCash,
     cancel,
-    
+    updateOrderMeta,
   };
 }

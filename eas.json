@@ -5,14 +5,18 @@
       "android": { "buildType": "apk" },
       "channel": "preview",
       "env": {
-         "EXPO_PUBLIC_API_BASE_URL": "https://seafoodrestaurantbe-production.up.railway.app/"
+         "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.11:8000",
+         "EXPO_PUBLIC_SOCKET_NAMESPACE": "/realtime-pos",
+         "EXPO_PUBLIC_SOCKET_PATH": "/socket.io"
       }
     },
     "production": {
       "android": { "buildType": "app-bundle" },
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://seafoodrestaurantbe-production.up.railway.app/"
+        "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.11:8000",
+        "EXPO_PUBLIC_SOCKET_NAMESPACE": "/realtime-pos",
+        "EXPO_PUBLIC_SOCKET_PATH": "/socket.io"
       }
     }
   }
