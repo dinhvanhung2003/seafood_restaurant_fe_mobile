@@ -1,12 +1,20 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as ImageManipulator from "expo-image-manipulator";
 import { useEffect, useRef } from "react";
-import { ActivityIndicator, Modal, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Modal,
+  Platform,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import tw from "twrnc";
 
 type Props = {
   visible: boolean;
   onClose: () => void;
-  onShot: (b64: string) => void; // trả base64 (KHÔNG prefix) cho màn gọi
+  onShot: (b64: string) => void; // base64 KHÔNG prefix
 };
 
 export default function FaceModal({ visible, onClose, onShot }: Props) {
@@ -20,19 +28,46 @@ export default function FaceModal({ visible, onClose, onShot }: Props) {
 
   async function takeShot() {
     if (!camRef.current) return;
-    const img = await camRef.current.takePictureAsync({
-      base64: true,
-      quality: 0.8,
-      skipProcessing: true,
-    });
-    if (img?.base64) onShot(img.base64);
+
+    try {
+      // 1) Chụp ảnh KHÔNG base64, quality vừa phải
+      const raw = await camRef.current.takePictureAsync({
+        base64: false,
+        quality: Platform.OS === "android" ? 0.6 : 0.5,
+        skipProcessing: Platform.OS === "android",
+      });
+
+      // 2) Resize về ~640px, nén và LÚC NÀY mới lấy base64
+      const manipulated = await ImageManipulator.manipulateAsync(
+        raw.uri,
+        [{ resize: { width: 640 } }],
+        {
+          compress: 0.6,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        }
+      );
+
+      if (manipulated.base64) {
+        onShot(manipulated.base64); // gửi chuỗi base64 gọn
+        onClose();                  // đóng modal để giải phóng camera
+      }
+    } catch (err) {
+      console.log("FACE_SHOT_ERROR", err);
+      onClose();
+    }
   }
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={tw`flex-1 bg-black`}>
         {granted ? (
-          <CameraView ref={camRef} style={tw`flex-1`} facing="front" autofocus="on" />
+          <CameraView
+            ref={camRef}
+            style={tw`flex-1`}
+            facing="front"
+            autofocus="on"
+          />
         ) : (
           <View style={tw`flex-1 items-center justify-center`}>
             <ActivityIndicator />

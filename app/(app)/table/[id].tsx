@@ -1,10 +1,11 @@
 import { Feather } from '@expo/vector-icons';
+import { useKitchenFlow } from '@hooks/notification/useKitchenFlow';
 import { useMenu } from '@hooks/useMenu';
 import { useOrders } from '@hooks/useOrder';
 import tw from '@lib/tw';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,17 +20,11 @@ type MenuRow = {
   id: string;
   name: string;
   image?: string;
-  // giá gốc
   price: number;
-  // giá sau khuyến mãi (nếu có)
   finalPrice: number;
-  // số tiền giảm
   discountAmount: number;
-  // % tiết kiệm
   pct: number;
-  // có KM hay không
   hasPromo: boolean;
-  // text badge nếu có
   badge?: string | null;
 };
 
@@ -41,28 +36,42 @@ type Category = {
 export default function TableMenuScreen() {
   const { id: tableId, name } = useLocalSearchParams<{ id: string; name?: string }>();
   const router = useRouter();
+
   const [page] = useState(1);
   const [limit] = useState(200);
   const [search, setSearch] = useState('');
-  const [categoryId, setCategoryId] = useState<'all' | string>('all'); // 🔹 có setter
+  const [categoryId, setCategoryId] = useState<'all' | string>('all');
 
-const menuQ = useMenu({
-  page,
-  limit,
-  search: '',      
-  categoryId: 'all',
-});
-  const { orders, addOne, changeQty } = useOrders();
+  const menuQ = useMenu({
+    page,
+    limit,
+    search: '',
+    categoryId: 'all',
+  });
+
+  const { orders } = useOrders();
+
+  // chỉ dùng onChangeQty + setCancelOneOpen
+  const { onChangeQty, setCancelOneOpen } = useKitchenFlow(tableId as string);
+
+  // cleanup: khi rời màn này thì đóng state popup huỷ món (nếu có)
+ useEffect(() => {
+  // vào màn: tắt luôn nếu đang mở từ màn trước
+  setCancelOneOpen(false);
+
+  // rời màn: tắt thêm 1 lần cho chắc
+  return () => {
+    setCancelOneOpen(false);
+  };
+}, [setCancelOneOpen]);
 
   const activeItems = orders[tableId as string]?.orders?.[0]?.items ?? [];
   const countInCart = activeItems.reduce((s: number, it: any) => s + it.qty, 0);
 
-  // 🔹 Chuẩn hóa raw menu
   const rawMenu: any[] = useMemo(() => {
     return Array.isArray(menuQ.data?.data) ? menuQ.data.data : menuQ.data ?? [];
   }, [menuQ.data]);
 
-  // 🔹 Build danh sách category từ menu (giống CategoryFilter ở web)
   const categories: Category[] = useMemo(() => {
     const map = new Map<string, string>();
 
@@ -81,26 +90,22 @@ const menuQ = useMenu({
     ];
   }, [rawMenu]);
 
-  // chỉ lấy món đang hoạt động và lọc theo keyword + category
   const items: MenuRow[] = useMemo(() => {
     const keyword = stripVN(search.trim().toLowerCase());
 
     return rawMenu
       .filter((r: any) => r.isAvailable)
-      // 🔹 lọc theo category
       .filter((r: any) => {
         if (categoryId === 'all') return true;
         const rCatId = r.categoryId ?? r.category?.id;
         return rCatId === categoryId;
       })
-      // 🔹 lọc theo keyword
       .filter((r: any) => {
         if (!keyword) return true;
         const name = stripVN((r.name ?? '').toLowerCase());
         return name.includes(keyword);
       })
       .map((r: any) => {
-        // ----- LOGIC KM giống FE web -----
         const discountAmount = Number(r.discountAmount ?? NaN);
         const hasPromo = Number.isFinite(discountAmount) && discountAmount > 0;
 
@@ -118,9 +123,7 @@ const menuQ = useMenu({
             : 0;
 
         const badge =
-          hasPromo &&
-          typeof r.badge === 'string' &&
-          r.badge.trim().length > 0
+          hasPromo && typeof r.badge === 'string' && r.badge.trim().length > 0
             ? r.badge.trim()
             : null;
 
@@ -138,9 +141,8 @@ const menuQ = useMenu({
       });
   }, [rawMenu, search, categoryId]);
 
-  // chọn món (bấm item)
   const handleSelectItem = async (item: MenuRow) => {
-    await addOne(tableId as string, item.id);
+    await onChangeQty(item.id, +1, item.name);
   };
 
   const renderItem = ({ item }: { item: MenuRow }) => {
@@ -153,7 +155,6 @@ const menuQ = useMenu({
         style={tw`px-4 py-3 border-b border-slate-100 bg-white active:bg-slate-50`}
       >
         <View style={tw`flex-row items-center gap-3`}>
-          {/* Ảnh + ribbon KM */}
           <View style={tw`w-16 h-16 rounded-xl bg-slate-100 overflow-hidden relative`}>
             <Image
               source={item.image ? { uri: item.image } : undefined}
@@ -162,9 +163,7 @@ const menuQ = useMenu({
             />
 
             {item.hasPromo && (
-              <View
-                style={tw`absolute left-0 top-0 rounded-br-md bg-emerald-600 px-1.5 py-0.5`}
-              >
+              <View style={tw`absolute left-0 top-0 rounded-br-md bg-emerald-600 px-1.5 py-0.5`}>
                 <Text style={tw`text-[10px] font-semibold text-white`}>
                   {item.badge ?? `-${item.discountAmount.toLocaleString('vi-VN')}đ`}
                 </Text>
@@ -172,16 +171,11 @@ const menuQ = useMenu({
             )}
           </View>
 
-          {/* Tên + Giá */}
           <View style={tw`flex-1`}>
-            <Text
-              numberOfLines={2}
-              style={tw`text-[15px] font-semibold text-slate-900`}
-            >
+            <Text numberOfLines={2} style={tw`text-[15px] font-semibold text-slate-900`}>
               {item.name}
             </Text>
 
-            {/* Nếu có KM: giá gốc gạch ngang + giá sau KM + text tiết kiệm */}
             {item.hasPromo ? (
               <View style={tw`mt-1`}>
                 <Text style={tw`text-[12px] text-slate-400 line-through`}>
@@ -201,13 +195,12 @@ const menuQ = useMenu({
             )}
           </View>
 
-          {/* Hiển thị số lượng nếu đã chọn */}
           {qty > 0 && (
             <View style={tw`flex-row items-center`}>
               <Pressable
-                onPress={(e) => {
-                  e.stopPropagation(); // tránh click trùng onPress cha
-                  changeQty(tableId as string, item.id, -1, activeItems);
+                onPress={e => {
+                  e.stopPropagation();
+                  onChangeQty(item.id, -1, item.name);
                 }}
                 style={tw`h-9 w-9 rounded-full bg-slate-100 items-center justify-center`}
               >
@@ -215,9 +208,9 @@ const menuQ = useMenu({
               </Pressable>
               <Text style={tw`mx-3 w-6 text-center font-semibold`}>{qty}</Text>
               <Pressable
-                onPress={(e) => {
+                onPress={e => {
                   e.stopPropagation();
-                  changeQty(tableId as string, item.id, +1, activeItems);
+                  onChangeQty(item.id, +1, item.name);
                 }}
                 style={tw`h-9 w-9 rounded-full bg-slate-100 items-center justify-center`}
               >
@@ -241,10 +234,7 @@ const menuQ = useMenu({
         )}
       >
         <Text
-          style={tw.style(
-            'text-xs font-medium',
-            isActive ? 'text-white' : 'text-slate-700',
-          )}
+          style={tw.style('text-xs font-medium', isActive ? 'text-white' : 'text-slate-700')}
         >
           {item.name}
         </Text>
@@ -254,7 +244,7 @@ const menuQ = useMenu({
 
   return (
     <View style={tw`flex-1 bg-slate-50`}>
-      {/* Header có tìm kiếm + category */}
+      {/* Header search + category */}
       <View style={tw`bg-white border-b border-slate-100 px-4 pt-12 pb-2`}>
         <View style={tw`flex-row items-center bg-slate-100 rounded-2xl px-3 h-10`}>
           <Pressable onPress={() => router.back()} hitSlop={10} style={tw`pr-2`}>
@@ -275,11 +265,10 @@ const menuQ = useMenu({
           )}
         </View>
 
-        {/* 🔹 Thanh category ngang */}
         {categories.length > 0 && (
           <FlatList
             data={categories}
-            keyExtractor={(c) => c.id}
+            keyExtractor={c => c.id}
             horizontal
             showsHorizontalScrollIndicator={false}
             renderItem={renderCategoryChip}
@@ -296,7 +285,7 @@ const menuQ = useMenu({
       ) : (
         <FlatList
           data={items}
-          keyExtractor={(it) => it.id}
+          keyExtractor={it => it.id}
           renderItem={renderItem}
           contentContainerStyle={tw`pb-28`}
           ListEmptyComponent={
@@ -312,12 +301,14 @@ const menuQ = useMenu({
         style={tw`absolute left-0 right-0 bottom-0 px-4 pb-5 pt-3 bg-white border-t border-slate-200`}
       >
         <Pressable
-          onPress={() =>
+          onPress={() => {
+            setCancelOneOpen(false);
+
             router.push({
               pathname: '/(app)/table/order',
               params: { id: tableId as string, name },
-            })
-          }
+            });
+          }}
           style={tw.style(
             `flex-1 h-12 rounded-xl items-center justify-center`,
             countInCart ? `bg-blue-600` : `bg-slate-300`,

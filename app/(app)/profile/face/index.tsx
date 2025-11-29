@@ -1,4 +1,3 @@
-// FaceEnrollScreen.tsx
 import http from "@services/http";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -8,61 +7,107 @@ import {
   Alert,
   Image,
   SafeAreaView,
-  StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import tw from "twrnc";
 
-// 3 bước cơ bản (bạn có thể đổi text gợi ý cho khớp backend)
-const STEPS: Array<"CENTER" | "LEFT" | "RIGHT"> = ["CENTER", "LEFT", "RIGHT"];
-const REQUIRED = STEPS.length;
+type LivenessStep = "LEFT" | "RIGHT" | "BLINK";
+
+type Challenge = {
+  id: string;
+  steps: LivenessStep[];
+  exp: number;
+};
 
 type FaceStatus = { enrolled: boolean; count: number };
+
+type EnrollSubmitFrame = {
+  step: LivenessStep;
+  imageBase64: string;
+};
 
 export default function FaceEnrollScreen({ navigation }: any) {
   const [permission, requestPermission] = useCameraPermissions();
   const camRef = useRef<CameraView>(null);
 
   const [busy, setBusy] = useState(false);
-  const [step, setStep] = useState(0); // 0..REQUIRED
-  const [shotsUri, setShotsUri] = useState<string[]>([]); // chỉ lưu URI để render
-  const [msg, setMsg] = useState<string>("");
+  const [msg, setMsg] = useState("");
 
   const [status, setStatus] = useState<FaceStatus | null>(null);
 
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const REQUIRED = challenge?.steps.length ?? 0;
+
+  const [stepIndex, setStepIndex] = useState(0);
+  const [shotsUri, setShotsUri] = useState<string[]>([]);
+
+  const framesRef = useRef<EnrollSubmitFrame[]>([]);
+
   const canCapture = useMemo(
-    () => !!permission?.granted && !busy && step < REQUIRED,
-    [permission, busy, step]
+    () => !!permission?.granted && !busy && !!challenge && stepIndex < REQUIRED,
+    [permission, busy, challenge, stepIndex, REQUIRED]
   );
 
+  // load status khuôn mặt
   useEffect(() => {
     (async () => {
       try {
         const r = await http.get<FaceStatus>("/face/status");
         setStatus(r.data);
-      } catch {
-        // ignore
-      }
+      } catch {}
     })();
   }, []);
 
+  useEffect(() => {
+    startChallenge();
+  }, []);
+
+  async function startChallenge() {
+    try {
+      setBusy(true);
+      const r = await http.post<{ ok: boolean; challenge: Challenge }>(
+        "/face/enroll-start",
+        {}
+      );
+      if (!r.data?.ok) {
+        Alert.alert("Lỗi", "Không tạo được thử thách khuôn mặt");
+        return;
+      }
+      setChallenge(r.data.challenge);
+      framesRef.current = [];
+      setShotsUri([]);
+      setStepIndex(0);
+    } catch (e: any) {
+      Alert.alert("Lỗi", e?.message ?? "Không tạo được challenge");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function currentStep(): LivenessStep | null {
+    if (!challenge) return null;
+    if (stepIndex >= challenge.steps.length) return null;
+    return challenge.steps[stepIndex];
+  }
+
   function tip() {
-    const t: Record<(typeof STEPS)[number], string> = {
-      CENTER: "Nhìn thẳng, đủ sáng, bỏ khẩu trang/kính râm.",
-      LEFT: "Quay nhẹ sang TRÁI (giữ bình thường).",
-      RIGHT: "Quay nhẹ sang PHẢI (giữ bình thường).",
-    };
-    const k = STEPS[Math.min(step, REQUIRED - 1)];
-    return t[k];
+    const s = currentStep();
+    if (!s) return "Đang chuẩn bị thử thách…";
+
+    if (s === "LEFT") return "Quay nhẹ sang TRÁI, nhìn vào camera 1–2 giây.";
+    if (s === "RIGHT") return "Quay nhẹ sang PHẢI, nhìn vào camera 1–2 giây.";
+    if (s === "BLINK") return "Nhìn thẳng vào camera và nháy mắt rõ ràng.";
+
+    return "";
   }
 
   async function ensurePermission() {
     if (!permission?.granted) {
       const res = await requestPermission();
       if (!res.granted) {
-        Alert.alert("Cần quyền camera", "Vui lòng cấp quyền camera để đăng ký khuôn mặt.");
+        Alert.alert("Cần quyền camera", "Hãy cấp quyền camera.");
         return false;
       }
     }
@@ -72,241 +117,235 @@ export default function FaceEnrollScreen({ navigation }: any) {
   async function takeAndEnroll() {
     if (!(await ensurePermission())) return;
     if (!camRef.current || busy) return;
+    if (!challenge) return;
+
+    const step = currentStep();
+    if (!step) return;
 
     try {
       setBusy(true);
       setMsg("Đang chụp ảnh…");
 
-      // 1) Chụp
       const photo = await camRef.current.takePictureAsync({
         base64: true,
-        quality: 0.5, // giảm để nhẹ RAM
-        exif: false,
-        skipProcessing: true,
+        quality: 0.5,
       });
-      if (!photo?.base64 || !photo?.uri) {
-        Alert.alert("Không lấy được ảnh", "Vui lòng thử lại.");
-        return;
-      }
 
-      // 2) Resize + nén trước khi gửi để tránh 413 & giảm crash
-      const manipulated = await ImageManipulator.manipulateAsync(
+      const img = await ImageManipulator.manipulateAsync(
         photo.uri,
         [{ resize: { width: 640 } }],
         { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
-      if (!manipulated.base64) {
-        Alert.alert("Không xử lý được ảnh", "Vui lòng thử lại.");
-        return;
-      }
 
-      // 3) Hiển thị preview = URI (không set base64 vào state!)
+      // lưu preview
       setShotsUri((arr) => {
         const next = [...arr];
-        next[step] = manipulated.uri;
+        next[stepIndex] = img.uri;
         return next;
       });
 
-      setMsg("Đang gửi ảnh để đăng ký…");
-      // Gọi API enroll từng ảnh (đơn giản). Nếu bạn dùng flow challenge/liveness,
-      // thay bằng gọi /face/enroll-submit khi đã gom đủ 3 ảnh.
-      const r = await http.post("/face/enroll", { imageBase64: manipulated.base64 });
+      framesRef.current[stepIndex] = {
+        step,
+        imageBase64: img.base64!,
+      };
 
-      // dọn base64 khỏi object để GC dọn nhanh
-      (manipulated as any).base64 = undefined;
+      const next = stepIndex + 1;
+      setStepIndex(next);
+      setMsg("");
 
-      if (!r?.data?.ok) {
-        Alert.alert(
-          "Ảnh không hợp lệ",
-          "Không nhận diện được khuôn mặt. Hãy chụp rõ hơn và chỉ 1 người trong khung."
-        );
-        // gỡ thumbnail vừa thêm
-        setShotsUri((arr) => {
-          const next = [...arr];
-          next[step] = "";
-          return next;
-        });
+      if (next < REQUIRED) return;
+
+      // đủ 3 ảnh → gửi submit
+      setMsg("Đang gửi ảnh để kiểm tra…");
+      const frames = framesRef.current.filter(Boolean);
+
+      const resp = await http.post("/face/enroll-submit", {
+        challengeId: challenge.id,
+        frames,
+      });
+
+      if (!resp.data?.ok) {
+        Alert.alert("Không hợp lệ", "Vui lòng thử lại theo đúng hướng dẫn.", [
+          { text: "OK", onPress: () => startChallenge() },
+        ]);
         return;
       }
 
-      const nextStep = step + 1;
-      setStep(nextStep);
-      setMsg("");
+      const s = await http.get<FaceStatus>("/face/status");
+      setStatus(s.data);
 
-      if (nextStep >= REQUIRED) {
-        // có thể gọi lại /face/status để cập nhật
-        try {
-          const s = await http.get<FaceStatus>("/face/status");
-          setStatus(s.data);
-        } catch {}
-        Alert.alert("Hoàn tất", "Đăng ký khuôn mặt thành công!", [
-          { text: "OK", onPress: () => navigation?.goBack?.() },
-        ]);
-      }
+      Alert.alert("Hoàn tất", "Đăng ký khuôn mặt thành công!", [
+        { text: "OK", onPress: () => navigation.goBack() },
+      ]);
     } catch (e: any) {
-      const message = e?.response?.data?.message || e?.message || "Không gửi được ảnh.";
-      Alert.alert("Lỗi", message);
+      Alert.alert("Lỗi", e?.message || "Không thể gửi ảnh.");
     } finally {
       setBusy(false);
+      setMsg("");
     }
   }
 
   function removeLast() {
-    if (busy || step === 0) return;
-    const i = step - 1;
+    if (busy || stepIndex === 0) return;
+    const i = stepIndex - 1;
+
     setShotsUri((arr) => {
       const next = [...arr];
       next[i] = "";
       return next;
     });
-    setStep(i);
+
+    framesRef.current[i] = undefined as any;
+    setStepIndex(i);
   }
 
   async function onResetFace() {
-    Alert.alert("Chỉnh sửa khuôn mặt", "Xoá toàn bộ mẫu cũ để đăng ký lại?", [
+    Alert.alert("Xoá khuôn mặt", "Xoá toàn bộ mẫu và đăng ký lại?", [
       { text: "Huỷ" },
       {
         text: "Đồng ý",
         style: "destructive",
         onPress: async () => {
-          try {
-            await http.post("/face/reset", {});
-            setStatus({ enrolled: false, count: 0 });
-            setStep(0);
-            setShotsUri([]);
-            setMsg("");
-            Alert.alert("Đã xoá mẫu cũ", "Bạn có thể đăng ký lại ngay bây giờ.");
-          } catch (e: any) {
-            const message = e?.response?.data?.message || e?.message || "Không thể xoá mẫu cũ.";
-            Alert.alert("Lỗi", message);
-          }
+          await http.post("/face/reset", {});
+          setStatus({ enrolled: false, count: 0 });
+          startChallenge();
         },
       },
     ]);
   }
 
-  // ===== RENDER =====
-  if (!permission) {
+  // ===== UI =====
+  if (!permission)
     return (
-      <SafeAreaView style={s.center}>
+      <SafeAreaView style={tw`flex-1 items-center justify-center bg-white`}>
         <ActivityIndicator />
-        <Text style={s.hint}>Đang kiểm tra quyền camera…</Text>
+        <Text style={tw`text-slate-500 mt-2`}>Đang kiểm tra quyền…</Text>
       </SafeAreaView>
     );
-  }
 
-  if (!permission.granted) {
+  if (!permission.granted)
     return (
-      <SafeAreaView style={s.center}>
-        <Text style={s.title}>Cần quyền camera</Text>
-        <Text style={s.hint}>Ứng dụng cần quyền để chụp ảnh khuôn mặt.</Text>
-        <TouchableOpacity style={[s.btn, s.btnPrimary]} onPress={requestPermission}>
-          <Text style={s.btnTextPrimary}>Cho phép</Text>
+      <SafeAreaView style={tw`flex-1 p-4 pt-10 bg-white`}>
+        <Text style={tw`text-xl font-bold mb-2`}>Cần quyền camera</Text>
+        <Text style={tw`text-slate-600 mb-4`}>
+          Ứng dụng cần quyền camera để đăng ký khuôn mặt.
+        </Text>
+
+        <TouchableOpacity
+          onPress={requestPermission}
+          style={tw`h-12 rounded-xl bg-blue-600 items-center justify-center`}
+        >
+          <Text style={tw`text-white font-semibold`}>Cho phép</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
-  }
 
   return (
-    <SafeAreaView style={s.container}>
-      <Text style={s.header}>Đăng ký khuôn mặt</Text>
+    <SafeAreaView style={tw`flex-1 bg-white p-4`}>
+      <Text style={tw`text-xl font-bold mt-2 mb-3`}>Đăng ký khuôn mặt</Text>
 
-      {/* Trạng thái đã đăng ký & nút chỉnh sửa */}
+      {/* Trạng thái */}
       <View style={tw`flex-row items-center justify-between mb-2`}>
         {status?.enrolled ? (
-          <Text style={tw`text-green-600 font-bold`}>Đã đăng ký ({status.count})</Text>
+          <Text style={tw`text-green-600 font-bold`}>
+            Đã đăng ký ({status.count})
+          </Text>
         ) : (
-          <Text style={tw`text-slate-500`}>Chưa có mẫu — cần {REQUIRED} ảnh</Text>
+          <Text style={tw`text-slate-500`}>
+            Chưa đăng ký — cần hoàn tất thử thách
+          </Text>
         )}
-        {status?.enrolled ? (
-          <TouchableOpacity onPress={onResetFace} style={[s.btn, s.btnSecondary, { height: 36, paddingHorizontal: 12 }]}>
-            <Text style={s.btnTextSecondary}>Chỉnh sửa</Text>
+
+        {status?.enrolled && (
+          <TouchableOpacity
+            onPress={onResetFace}
+            style={tw`px-3 h-9 rounded-lg border border-slate-300 items-center justify-center`}
+          >
+            <Text style={tw`text-slate-700 font-semibold`}>Xoá mẫu</Text>
           </TouchableOpacity>
-        ) : null}
+        )}
       </View>
 
-      {/* Tiến độ */}
-      <View style={s.progressRow}>
-        {Array.from({ length: REQUIRED }).map((_, i) => {
+      {/* Progress */}
+      <View style={tw`flex-row items-center mb-2`}>
+        {Array.from({ length: REQUIRED || 3 }).map((_, i) => {
           const done = !!shotsUri[i];
-          const active = i === step;
-          return <View key={i} style={[s.dot, done ? s.dotDone : active ? s.dotActive : s.dotIdle]} />;
+          const active = i === stepIndex;
+          return (
+            <View
+              key={i}
+              style={tw.style(
+                `w-3 h-3 rounded-full mr-2`,
+                done
+                  ? `bg-blue-600`
+                  : active
+                  ? `bg-blue-300`
+                  : `bg-slate-300`
+              )}
+            />
+          );
         })}
-        <Text style={s.progressText}>{step}/{REQUIRED}</Text>
+        <Text style={tw`text-slate-500 ml-1`}>
+          {stepIndex}/{REQUIRED}
+        </Text>
       </View>
 
-      <Text style={s.tip}>{tip()}</Text>
+      <Text style={tw`text-slate-700 mb-2`}>{tip()}</Text>
 
-      {/* Camera */}
-      <View style={s.cameraWrap}>
-        <CameraView ref={camRef} style={s.camera} facing="front" enableTorch={false} autofocus="on" />
+      {/* CAMERA */}
+      <View style={tw`w-full h-96 rounded-2xl overflow-hidden bg-black mb-3`}>
+        <CameraView ref={camRef} style={tw`flex-1`} facing="front" />
       </View>
 
-      {!!msg && (
-        <View style={s.msgBox}>
+      {msg ? (
+        <View style={tw`flex-row items-center gap-2 mb-2`}>
           <ActivityIndicator />
-          <Text style={s.msgText}>{msg}</Text>
+          <Text style={tw`text-slate-600`}>{msg}</Text>
         </View>
-      )}
+      ) : null}
 
-      {/* Actions */}
-      <View style={s.actions}>
-        <TouchableOpacity style={[s.btn, s.btnSecondary]} onPress={removeLast} disabled={busy || step === 0}>
-          <Text style={s.btnTextSecondary}>Chụp lại</Text>
+      {/* ACTION BUTTONS */}
+      <View style={tw`flex-row gap-3 mb-4`}>
+        <TouchableOpacity
+          style={tw.style(
+            `flex-1 h-12 rounded-xl border border-slate-300 items-center justify-center`,
+            busy && `opacity-50`
+          )}
+          onPress={removeLast}
+          disabled={busy || stepIndex === 0}
+        >
+          <Text style={tw`text-slate-700 font-semibold`}>Chụp lại</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[s.btn, s.btnPrimary, (!canCapture ? s.btnDisabled : null)]} onPress={takeAndEnroll} disabled={!canCapture}>
-          <Text style={s.btnTextPrimary}>{step >= REQUIRED - 1 ? "Chụp & Hoàn tất" : "Chụp & Gửi"}</Text>
+        <TouchableOpacity
+          style={tw.style(
+            `flex-1 h-12 rounded-xl bg-blue-600 items-center justify-center`,
+            !canCapture && `opacity-50`
+          )}
+          disabled={!canCapture}
+          onPress={takeAndEnroll}
+        >
+          <Text style={tw`text-white font-semibold`}>
+            {stepIndex >= (REQUIRED || 1) - 1 ? "Hoàn tất" : "Chụp & Gửi"}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Thumbnails */}
-      <View style={s.thumbRow}>
-        {Array.from({ length: REQUIRED }).map((_, i) => (
-          <View key={i} style={s.thumbBox}>
-            {shotsUri[i] ? <Image source={{ uri: shotsUri[i] }} style={s.thumb} /> : <Text style={s.thumbHint}>{i + 1}</Text>}
+      {/* THUMBNAILS */}
+      <View style={tw`flex-row gap-3`}>
+        {Array.from({ length: REQUIRED || 3 }).map((_, i) => (
+          <View
+            key={i}
+            style={tw`w-20 h-20 rounded-xl border border-slate-300 items-center justify-center overflow-hidden`}
+          >
+            {shotsUri[i] ? (
+              <Image source={{ uri: shotsUri[i] }} style={tw`w-full h-full`} />
+            ) : (
+              <Text style={tw`text-slate-400`}>{i + 1}</Text>
+            )}
           </View>
         ))}
       </View>
     </SafeAreaView>
   );
 }
-
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff", paddingHorizontal: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16, backgroundColor: "#fff" },
-  header: { fontSize: 20, fontWeight: "800", marginTop: 8, marginBottom: 6, color: "#111827" },
-  progressRow: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
-  dot: { width: 10, height: 10, borderRadius: 6, marginRight: 6 },
-  dotIdle: { backgroundColor: "#e5e7eb" },
-  dotActive: { backgroundColor: "#93c5fd" },
-  dotDone: { backgroundColor: "#2563eb" },
-  progressText: { marginLeft: 4, color: "#6b7280" },
-  tip: { color: "#374151", marginBottom: 8 },
-  cameraWrap: { height: 380, borderRadius: 16, overflow: "hidden", backgroundColor: "#000" },
-  camera: { flex: 1 },
-  actions: { flexDirection: "row", gap: 12, marginTop: 14 },
-  btn: { flex: 1, height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  btnPrimary: { backgroundColor: "#2563eb" },
-  btnTextPrimary: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  btnSecondary: { borderWidth: StyleSheet.hairlineWidth, borderColor: "#e5e7eb", backgroundColor: "#fff" },
-  btnTextSecondary: { color: "#111827", fontSize: 16, fontWeight: "700" },
-  btnDisabled: { opacity: 0.6 },
-  msgBox: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 8 },
-  msgText: { color: "#374151" },
-  thumbRow: { flexDirection: "row", gap: 8, marginTop: 14, marginBottom: 16 },
-  thumbBox: {
-    width: 70,
-    height: 70,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#e5e7eb",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  thumb: { width: "100%", height: "100%" },
-  thumbHint: { color: "#9ca3af" },
-  hint: { color: "#6b7280", textAlign: "center", marginTop: 8 },
-  title: { fontSize: 20, fontWeight: "800", color: "#111827", marginBottom: 8 },
-});

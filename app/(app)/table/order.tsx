@@ -1,16 +1,16 @@
-// apps/mobile/app/(app)/table/order.tsx
 import { useKitchenFlow } from '@hooks/notification/useKitchenFlow';
 import { useKitchenVoids } from '@hooks/notification/useKitchenVoids';
 import { useCancelSocketLive } from '@hooks/socket/socket/useCancelSocket';
 import { useKitchenProgress } from '@hooks/useKitchenProgress';
 import { useMenu } from '@hooks/useMenu';
 import { useOrders } from '@hooks/useOrder';
+import { getSocket } from '@lib/socket';
 import tw from '@lib/tw';
 import http from '@services/http';
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -25,7 +25,6 @@ import { usePosSocketLive } from '../../../src/hooks/socket/socket/useSocket';
 
 type Meta = { id: string; name: string; price: number; image?: string };
 
-// Kiểu khách hàng tối thiểu
 type CustomerLite = {
   id: string;
   name: string;
@@ -37,9 +36,33 @@ export default function OrderScreen() {
   const router = useRouter();
   const qc = useQueryClient();
 
+  
+  console.log('STEP 1: start OrderScreen', tableId, name);
+
+  const [orderNote, setOrderNote] = useState('');
+  const [isPriority, setIsPriority] = useState(false);
   const { orders } = useOrders();
+
+  console.log('STEP 2: after useOrders');
+
+  const [orderNoteModalOpen, setOrderNoteModalOpen] = useState(false);
+  const [itemNoteModalOpen, setItemNoteModalOpen] = useState(false);
+
+  const [editingNoteItem, setEditingNoteItem] = useState<{
+    id: string;
+    menuItemId: string;
+    name: string;
+    note?: string | null;
+  } | null>(null);
+
   const orderRow = orders[tableId as string]?.orders?.[0];
-  const items: Array<{ id: string; qty: number; rowId?: string }> = orderRow?.items ?? [];
+
+  const items = (orderRow?.items ?? []) as Array<{
+    id: string;
+    qty: number;
+    rowId?: string;
+    note?: string | null;
+  }>;
 
   // meta món
   const menuQ = useMenu({ page: 1, limit: 500, search: '', categoryId: 'all' });
@@ -62,11 +85,9 @@ export default function OrderScreen() {
     [items, menuMap],
   );
 
-  // meta khách / số khách từ orderRow
   const guestCount = orderRow?.guestCount ?? 0;
   const customer: CustomerLite | null = orderRow?.customer ?? null;
 
-  // flow hủy / báo bếp
   const {
     currentOrderId,
     canNotify,
@@ -79,15 +100,63 @@ export default function OrderScreen() {
     confirmCancelOne,
   } = useKitchenFlow(tableId as string);
 
-  // banner void từ bếp
+  // đảm bảo modal huỷ luôn tắt khi vào / rời màn
+  useEffect(() => {
+    setCancelOneOpen(false);
+    return () => {
+      setCancelOneOpen(false);
+    };
+  }, [setCancelOneOpen]);
+
   const { kitchenVoids, clearKitchenVoid, clearAllKitchenVoids } =
     useKitchenVoids(currentOrderId);
 
-  // progress để show badge
   const { data: progress = [] } = useKitchenProgress(currentOrderId);
 
   usePosSocketLive(currentOrderId);
   useCancelSocketLive(currentOrderId);
+
+  useEffect(() => {
+    if (!currentOrderId) return;
+    const s = getSocket();
+
+    const onNewBatch = (p: {
+      orderId: string;
+      note?: string | null;
+      priority?: boolean;
+      source?: string;
+    }) => {
+      if (p.orderId !== currentOrderId) return;
+      setOrderNote(p.note ?? '');
+      setIsPriority(!!p.priority);
+    };
+
+    s.on('kitchen:new_batch', onNewBatch);
+    return () => {
+      s.off('kitchen:new_batch', onNewBatch);
+    };
+  }, [currentOrderId]);
+
+  useEffect(() => {
+    if (!currentOrderId) return;
+    const s = getSocket();
+
+    const onItemNoteUpdated = (p: {
+      orderId: string;
+      orderItemId: string;
+      menuItemId: string;
+      note: string | null;
+      by: string;
+    }) => {
+      if (p.orderId !== currentOrderId) return;
+      qc.invalidateQueries({ queryKey: ['active-orders'] });
+    };
+
+    s.on('orderitem:note_updated', onItemNoteUpdated);
+    return () => {
+      s.off('orderitem:note_updated', onItemNoteUpdated);
+    };
+  }, [currentOrderId, qc]);
 
   const progressMap = useMemo(() => {
     const m = new Map<
@@ -106,21 +175,30 @@ export default function OrderScreen() {
     return m;
   }, [progress]);
 
-  // 🔹 state mở modal
+  // nếu orderRow không còn (auto huỷ) → quay về màn chọn món
+  // useEffect(() => {
+  //   if (!orderRow) {
+  //     router.replace({
+  //       pathname: '/(app)/table/[id]',
+  //       params: { id: tableId as string, name },
+  //     });
+  //   }
+  // }, [orderRow, tableId, name]);
+
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
 
-  // 🔹 gọi API cập nhật meta order
   const updateOrderMeta = async (body: { guestCount?: number; customerId?: string | null }) => {
     if (!currentOrderId) return;
     await http.patch(`/orders/${currentOrderId}/meta`, body);
-    // tuỳ hệ thống query key, anh/chị có thể refetch:
-    // await qc.invalidateQueries({ queryKey: ['orders'] });
-    // hoặc chỉ rely vào socket order:meta_updated
     await qc.invalidateQueries({ queryKey: ['active-orders'] });
   };
 
-  const renderItem = ({ item }: { item: { id: string; qty: number; rowId?: string } }) => {
+  const renderItem = ({
+    item,
+  }: {
+    item: { id: string; qty: number; rowId?: string; note?: string | null };
+  }) => {
     const meta = menuMap.get(item.id);
     const displayName = meta?.name ?? item.id.slice(0, 6);
     const price = meta?.price ?? 0;
@@ -133,6 +211,8 @@ export default function OrderScreen() {
         cooked: 0,
       };
 
+    const itemNote = (item as any).note ?? '';
+ console.log('STEP 3: before JSX render');
     return (
       <View style={tw`px-4 py-3 border-b border-slate-100`}>
         <View style={tw`flex-row items-center gap-3`}>
@@ -148,11 +228,35 @@ export default function OrderScreen() {
             </Text>
             <Text style={tw`mt-1 text-slate-600`}>{price.toLocaleString('vi-VN')}</Text>
 
-            <View style={tw`mt-1 flex-row flex-wrap gap-2`}>
+            <View style={tw`mt-1 flex-row flex-wrap`}>
               <Badge label={`Đã báo: ${p.notified}`} />
               <Badge label={`Đang nấu: ${p.preparing}`} />
               <Badge label={`Ra món: ${p.ready}`} />
               <Badge label={`Đã phục vụ: ${p.served}`} />
+            </View>
+
+            <View style={tw`mt-2`}>
+              <Pressable
+                onPress={() => {
+                  setItemNoteModalOpen(true);
+                  setEditingNoteItem({
+                    id: item.rowId!,
+                    menuItemId: item.id,
+                    name: displayName,
+                    note: itemNote,
+                  });
+                }}
+              >
+                <Chip
+                  label={
+                    itemNote
+                      ? `Ghi chú: ${itemNote.slice(0, 10)}${
+                          itemNote.length > 10 ? '…' : ''
+                        }`
+                      : 'Thêm ghi chú món'
+                  }
+                />
+              </Pressable>
             </View>
           </View>
 
@@ -179,7 +283,9 @@ export default function OrderScreen() {
   return (
     <View style={tw`flex-1 bg-white`}>
       {/* Header */}
-      <View style={tw`px-4 py-3 border-b border-slate-100 flex-row items-center justify-between`}>
+      <View
+        style={tw`px-4 py-3 border-b border-slate-100 flex-row items-center justify-between`}
+      >
         <Pressable onPress={() => router.back()}>
           <Text style={tw`text-xl`}>‹</Text>
         </Pressable>
@@ -227,23 +333,44 @@ export default function OrderScreen() {
         </View>
       )}
 
-      {/* 🔹 Chips: khách + số khách + ghi chú */}
-      <View style={tw`px-3 py-2 flex-row flex-wrap gap-2`}>
+      {/* Chips meta */}
+      <View style={tw`px-3 py-2 flex-row flex-wrap`}>
         <Pressable onPress={() => setGuestModalOpen(true)}>
           <Chip label={`Khách: ${guestCount || 0}`} />
         </Pressable>
 
-        <Pressable onPress={() => setCustomerModalOpen(true)}>
-          <Chip
-            label={
-              customer?.name
-                ? `KH: ${customer.name}`
-                : 'Chọn khách'
-            }
-          />
-        </Pressable>
+        <View style={tw`flex-row items-center ml-2`}>
+          <Pressable onPress={() => setCustomerModalOpen(true)}>
+            <Chip label={customer?.name ? `KH: ${customer.name}` : 'Chọn khách'} />
+          </Pressable>
 
-        <Chip label="Ghi chú" />
+          {customer && (
+            <Pressable
+              onPress={async () => {
+                await updateOrderMeta({ customerId: null });
+              }}
+              style={tw`ml-1`}
+            >
+              <Chip label="✕" />
+            </Pressable>
+          )}
+        </View>
+
+        <View style={tw`ml-2 mt-1`}>
+          <Pressable onPress={() => setOrderNoteModalOpen(true)}>
+            <Chip
+              label={
+                orderNote
+                  ? `Ghi chú: ${orderNote.slice(0, 10)}${
+                      orderNote.length > 10 ? '…' : ''
+                    }`
+                  : isPriority
+                  ? 'Ưu tiên bếp'
+                  : 'Ghi chú'
+              }
+            />
+          </Pressable>
+        </View>
       </View>
 
       {/* Danh sách món */}
@@ -254,7 +381,7 @@ export default function OrderScreen() {
       ) : (
         <FlatList
           data={items}
-          keyExtractor={(x) => x.rowId ?? `${x.id}`}
+          keyExtractor={x => x.rowId ?? `${x.id}`}
           renderItem={renderItem}
           contentContainerStyle={tw`pb-28`}
         />
@@ -262,13 +389,14 @@ export default function OrderScreen() {
 
       {/* Nút nổi thêm món */}
       <Pressable
-        onPress={() =>
+        onPress={() => {
+          setCancelOneOpen(false);
           router.push({
             pathname: '/(app)/table/[id]',
             params: { id: tableId as string, name },
-          })
-        }
-        style={tw`absolute right-5 bottom-26 h-14 w-14 rounded-full bg-blue-600 items-center justify-center shadow z-100`}
+          });
+        }}
+        style={tw`absolute right-5 bottom-26 h-14 w-14 rounded-full bg-blue-600 items-center justify-center shadow`}
       >
         <Text style={tw`text-white text-2xl`}>＋</Text>
       </Pressable>
@@ -284,7 +412,14 @@ export default function OrderScreen() {
 
         <View style={tw`flex-row gap-3`}>
           <Pressable
-            onPress={() => onNotify(name || String(tableId))}
+            onPress={() =>
+              onNotify({
+                tableName: name || String(tableId),
+                note: orderNote.trim() || undefined,
+                priority: isPriority,
+                source: 'waiter',
+              })
+            }
             disabled={!canNotify || notifying}
             style={tw`flex-1 h-12 rounded-xl border border-blue-600 items-center justify-center ${
               !canNotify || notifying ? 'opacity-50' : ''
@@ -294,49 +429,126 @@ export default function OrderScreen() {
               {notifying ? 'Đang gửi...' : 'Thông báo'}
             </Text>
           </Pressable>
-
-          {/* <Pressable
-            style={tw`flex-1 h-12 rounded-xl bg-blue-600 items-center justify-center`}
-            onPress={() =>
-              router.push({
-                pathname: '/(app)/table/checkout',
-                params: { tableId: tableId as string, name, total: String(total) },
-              })
-            }
-          >
-            <Text style={tw`text-white font-bold`}>Thanh toán</Text>
-          </Pressable> */}
         </View>
       </View>
 
-      <CancelOneItemModal
-        open={cancelOneOpen}
-        item={cancelOne}
-        onClose={() => setCancelOneOpen(false)}
-        onConfirm={confirmCancelOne}
-      />
+      {/* Modal huỷ một món */}
+      {cancelOneOpen && cancelOne && (
+        <CancelOneItemModal
+          open={cancelOneOpen}
+          item={cancelOne}
+          onClose={() => setCancelOneOpen(false)}
+          onConfirm={confirmCancelOne}
+        />
+      )}
 
-      {/* 🔹 Modal chọn khách */}
+      {/* Modal chọn khách */}
       <SelectCustomerModal
         visible={customerModalOpen}
         onClose={() => setCustomerModalOpen(false)}
-        onSelected={async (c) => {
+        onSelected={async c => {
           await updateOrderMeta({ customerId: c.id });
+          setCustomerModalOpen(false);
+        }}
+        onClear={async () => {
+          await updateOrderMeta({ customerId: null });
           setCustomerModalOpen(false);
         }}
       />
 
-      {/* 🔹 Modal nhập số khách */}
+      {/* Modal nhập số khách */}
       <GuestCountModalMobile
         visible={guestModalOpen}
         initialValue={guestCount || 1}
         onClose={() => setGuestModalOpen(false)}
-        onSubmit={async (value) => {
+        onSubmit={async value => {
           await updateOrderMeta({ guestCount: value });
           setGuestModalOpen(false);
         }}
       />
+
+      {/* Modal note + ưu tiên bếp */}
+      <NotePriorityModal
+        visible={orderNoteModalOpen}
+        note={orderNote}
+        priority={isPriority}
+        onClose={() => setOrderNoteModalOpen(false)}
+        onSave={(note, priority) => {
+          setOrderNote(note);
+          setIsPriority(priority);
+          setOrderNoteModalOpen(false);
+        }}
+      />
+
+      {/* Modal note cho từng món */}
+      {editingNoteItem && (
+        <ItemNoteModal
+          visible={itemNoteModalOpen}
+          item={editingNoteItem}
+          onClose={() => {
+            setItemNoteModalOpen(false);
+            setEditingNoteItem(null);
+          }}
+          onSave={async newNote => {
+            await http.patch(`/orderitems/${editingNoteItem.id}/note`, {
+              note: newNote,
+            });
+            await qc.invalidateQueries({ queryKey: ['active-orders'] });
+            setItemNoteModalOpen(false);
+            setEditingNoteItem(null);
+          }}
+        />
+      )}
     </View>
+  );
+}
+
+function ItemNoteModal({
+  visible,
+  item,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  item: { id: string; name: string; note?: string | null };
+  onClose: () => void;
+  onSave: (note: string) => void | Promise<void>;
+}) {
+  const [value, setValue] = useState(item.note ?? '');
+
+  useEffect(() => {
+    setValue(item.note ?? '');
+  }, [item, visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={tw`flex-1 bg-black/40 justify-center px-6`}>
+        <View style={tw`rounded-2xl bg-white p-4`}>
+          <Text style={tw`text-base font-semibold mb-1`}>Ghi chú cho món</Text>
+          <Text style={tw`text-sm text-slate-600 mb-2`}>{item.name}</Text>
+
+          <TextInput
+            style={tw`border border-slate-200 rounded-xl px-3 py-2 h-24 text-left text-top`}
+            placeholder="Ví dụ: Ít cay, không hành…"
+            multiline
+            value={value}
+            onChangeText={setValue}
+          />
+
+          <View style={tw`mt-4 flex-row justify-end gap-3`}>
+            <Pressable onPress={onClose}>
+              <Text style={tw`text-slate-600`}>Hủy</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => onSave(value)}
+              style={tw`px-4 h-10 rounded-xl bg-blue-600 items-center justify-center`}
+            >
+              <Text style={tw`text-white font-semibold`}>Lưu</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -353,22 +565,23 @@ function Chip({ label }: { label: string }) {
 function Badge({ label }: { label: string }) {
   return (
     <View
-      style={tw`px-2 h-6 rounded-full bg-slate-100 border border-slate-200 items-center justify-center`}
+      style={tw`px-2 h-6 rounded-full bg-slate-100 border border-slate-200 items-center justify-center mr-2 mb-2`}
     >
       <Text style={tw`text-[12px] text-slate-700`}>{label}</Text>
     </View>
   );
 }
 
-/** ===== Modal chọn khách (mobile) ===== */
 function SelectCustomerModal({
   visible,
   onClose,
   onSelected,
+  onClear,
 }: {
   visible: boolean;
   onClose: () => void;
   onSelected: (c: CustomerLite) => void | Promise<void>;
+  onClear?: () => void;
 }) {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
@@ -378,11 +591,9 @@ function SelectCustomerModal({
     if (!q.trim()) return;
     try {
       setLoading(true);
-      // 👉 Endpoint search khách – chỉnh lại path/param cho đúng BE của anh/chị
       const { data } = await http.get('/customers', {
         params: { search: q.trim(), limit: 20 },
       });
-      // giả sử BE trả { data: [...] }
       const rows = Array.isArray(data?.data) ? data.data : data ?? [];
       setResults(
         rows.map((r: any) => ({
@@ -399,7 +610,7 @@ function SelectCustomerModal({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={tw`flex-1 bg-black/40 justify-center px-6`}>
-        <View style={tw`rounded-2xl bg-white p-4 max-h-[70%]`}>
+        <View style={tw`rounded-2xl bg-white p-4`}>
           <Text style={tw`text-base font-semibold mb-2`}>Chọn khách hàng</Text>
 
           <View style={tw`flex-row items-center mb-3`}>
@@ -424,8 +635,8 @@ function SelectCustomerModal({
           ) : (
             <FlatList
               data={results}
-              keyExtractor={(it) => it.id}
-              style={tw`max-h-[40vh]`}
+              keyExtractor={it => it.id}
+              style={{ maxHeight: 280 }} // tránh dùng [40vh]
               ListEmptyComponent={
                 <View style={tw`py-4 items-center`}>
                   <Text style={tw`text-slate-500 text-sm`}>Không có kết quả.</Text>
@@ -445,7 +656,13 @@ function SelectCustomerModal({
             />
           )}
 
-          <View style={tw`mt-3 flex-row justify-end gap-3`}>
+          <View style={tw`mt-3 flex-row justify-between`}>
+            {onClear && (
+              <Pressable onPress={onClear}>
+                <Text style={tw`text-red-500`}>Bỏ chọn khách</Text>
+              </Pressable>
+            )}
+
             <Pressable onPress={onClose}>
               <Text style={tw`text-slate-600`}>Đóng</Text>
             </Pressable>
@@ -456,7 +673,6 @@ function SelectCustomerModal({
   );
 }
 
-/** ===== Modal nhập số khách (mobile) ===== */
 function GuestCountModalMobile({
   visible,
   initialValue,
@@ -471,7 +687,7 @@ function GuestCountModalMobile({
   const [value, setValue] = useState(initialValue || 1);
 
   const change = (delta: number) => {
-    setValue((v) => Math.max(1, v + delta));
+    setValue(v => Math.max(1, v + delta));
   };
 
   return (
@@ -502,6 +718,74 @@ function GuestCountModalMobile({
             </Pressable>
             <Pressable
               onPress={() => onSubmit(value)}
+              style={tw`px-4 h-10 rounded-xl bg-blue-600 items-center justify-center`}
+            >
+              <Text style={tw`text-white font-semibold`}>Lưu</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function NotePriorityModal({
+  visible,
+  note,
+  priority,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  note: string;
+  priority: boolean;
+  onClose: () => void;
+  onSave: (note: string, priority: boolean) => void;
+}) {
+  const [localNote, setLocalNote] = useState(note);
+  const [localPriority, setLocalPriority] = useState(priority);
+
+  useEffect(() => {
+    setLocalNote(note);
+    setLocalPriority(priority);
+  }, [note, priority, visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={tw`flex-1 bg-black/40 justify-center px-6`}>
+        <View style={tw`rounded-2xl bg-white p-4`}>
+          <Text style={tw`text-base font-semibold mb-2`}>Ghi chú cho bếp</Text>
+
+          <TextInput
+            style={tw`border border-slate-200 rounded-xl px-3 py-2 h-24 text-left text-top`}
+            placeholder="Ví dụ: Ưu tiên ra nhanh, ít cay, không hành..."
+            multiline
+            value={localNote}
+            onChangeText={setLocalNote}
+          />
+
+          <View style={tw`mt-3 flex-row items-center justify-between`}>
+            <Text style={tw`text-sm text-slate-700`}>Đánh dấu ưu tiên</Text>
+            <Pressable
+              onPress={() => setLocalPriority(p => !p)}
+              style={tw`w-12 h-7 rounded-full ${
+                localPriority ? 'bg-emerald-500' : 'bg-slate-300'
+              } justify-center`}
+            >
+              <View
+                style={tw`w-6 h-6 rounded-full bg-white ${
+                  localPriority ? 'ml-6' : 'ml-1'
+                }`}
+              />
+            </Pressable>
+          </View>
+
+          <View style={tw`mt-4 flex-row justify-end gap-3`}>
+            <Pressable onPress={onClose}>
+              <Text style={tw`text-slate-600`}>Hủy</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => onSave(localNote, localPriority)}
               style={tw`px-4 h-10 rounded-xl bg-blue-600 items-center justify-center`}
             >
               <Text style={tw`text-white font-semibold`}>Lưu</Text>

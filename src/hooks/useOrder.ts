@@ -18,7 +18,8 @@ export type ItemStatus =
 export type UIOrderItem = {
   id: string;          
   qty: number;
-  rowId?: string;     
+  rowId?: string;    
+   note?: string | null; 
 };
 export type UIOrderTab = {
   id: string;         
@@ -104,6 +105,7 @@ export function useOrders() {
       id: it.menuItem?.id ?? it.menuItemId,
       qty: it.quantity,
       rowId: it.id,
+       note: it.note ?? null,     
     }));
 
     const tabId = Math.random().toString(36).slice(2, 9);

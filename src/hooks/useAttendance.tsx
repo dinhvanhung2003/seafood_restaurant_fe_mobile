@@ -8,7 +8,12 @@ export type ShiftToday = {
   start: string;  // HH:mm
   end: string;    // HH:mm
   note?: string;
+
+  attCheckIn?: string | null;
+  attCheckOut?: string | null;
+  attStatus?: "MISSING" | "ON_TIME" | "LATE" | string | null;
 };
+
 
 export async function fetchTodayShifts(dateISO?: string): Promise<ShiftToday[]> {
   const date = dateISO ?? new Date().toISOString().slice(0, 10);
