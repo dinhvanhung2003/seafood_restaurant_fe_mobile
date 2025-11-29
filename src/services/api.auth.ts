@@ -83,4 +83,14 @@ export const AuthAPI = {
       // ignore
     }
   },
+  async forgotPassword(email: string) {
+    // Backend expects { email }
+    await http.post('/user/forgot-password', { email });
+    return true;
+  },
+
+  async resetPassword(body: { email: string; otp: string; newPassword: string; confirmNewPassword: string }) {
+    await http.post('/user/reset-password', body);
+    return true;
+  },
 };
