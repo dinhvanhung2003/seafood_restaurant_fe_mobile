@@ -1,3 +1,4 @@
+import { Feather } from '@expo/vector-icons';
 import { useKitchenFlow } from '@hooks/notification/useKitchenFlow';
 import { useKitchenVoids } from '@hooks/notification/useKitchenVoids';
 import { useCancelSocketLive } from '@hooks/socket/socket/useCancelSocket';
@@ -11,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
+
 import {
   ActivityIndicator,
   FlatList,
@@ -35,7 +37,16 @@ export default function OrderScreen() {
   const { id: tableId, name } = useLocalSearchParams<{ id: string; name?: string }>();
   const router = useRouter();
   const qc = useQueryClient();
+// ⭐ đánh dấu món (chỉ local, không gửi BE)
+  const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
 
+  const toggleFlag = (rowKey: string) => {
+    setFlaggedIds(prev =>
+      prev.includes(rowKey)
+        ? prev.filter(x => x !== rowKey)
+        : [...prev, rowKey],
+    );
+  };
   
   console.log('STEP 1: start OrderScreen', tableId, name);
 
@@ -211,6 +222,10 @@ export default function OrderScreen() {
         cooked: 0,
       };
 
+
+    // dùng rowId làm key chính, fallback về id nếu thiếu
+    const rowKey = item.rowId ?? item.id;
+    const isFlagged = flaggedIds.includes(rowKey);
     const itemNote = (item as any).note ?? '';
  console.log('STEP 3: before JSX render');
     return (
@@ -260,7 +275,20 @@ export default function OrderScreen() {
             </View>
           </View>
 
-          <View style={tw`flex-row items-center`}>
+                  <View style={tw`flex-row items-center`}>
+            {/* ⭐ nút đánh dấu chỉ cho waiter / thu ngân */}
+            <Pressable
+              onPress={() => toggleFlag(rowKey)}
+              style={tw`mr-2`}
+              hitSlop={8}
+            >
+              <Feather
+                name="star"
+                size={20}
+                color={isFlagged ? '#facc15' : '#cbd5f5'} // vàng khi được đánh dấu, xám khi tắt
+              />
+            </Pressable>
+
             <Pressable
               onPress={() => onChangeQty(item.id, -1, displayName)}
               style={tw`h-9 w-9 rounded-full bg-slate-100 items-center justify-center`}
@@ -275,6 +303,7 @@ export default function OrderScreen() {
               <Text style={tw`text-xl`}>＋</Text>
             </Pressable>
           </View>
+
         </View>
       </View>
     );
