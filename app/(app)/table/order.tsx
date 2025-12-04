@@ -38,20 +38,31 @@ export default function OrderScreen() {
   const router = useRouter();
   const qc = useQueryClient();
 // ⭐ đánh dấu món (chỉ local, không gửi BE)
-  const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
+  const [isPriority, setIsPriority] = useState(false);
+
+// ⭐ đánh dấu món (chỉ local, nhưng sẽ bật ưu tiên bếp)
+const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
 
   const toggleFlag = (rowKey: string) => {
-    setFlaggedIds(prev =>
-      prev.includes(rowKey)
-        ? prev.filter(x => x !== rowKey)
-        : [...prev, rowKey],
-    );
-  };
+  setFlaggedIds(prev => {
+    const exists = prev.includes(rowKey);
+    const next = exists
+      ? prev.filter(x => x !== rowKey)
+      : [...prev, rowKey];
+
+    // 👉 Nếu còn ít nhất 1 món được gắn sao => bật ưu tiên
+    //    Nếu bỏ hết sao => tắt ưu tiên
+    setIsPriority(next.length > 0);
+
+    return next;
+  });
+};
+
   
   console.log('STEP 1: start OrderScreen', tableId, name);
 
   const [orderNote, setOrderNote] = useState('');
-  const [isPriority, setIsPriority] = useState(false);
+
   const { orders } = useOrders();
 
   console.log('STEP 2: after useOrders');
@@ -127,26 +138,30 @@ export default function OrderScreen() {
   usePosSocketLive(currentOrderId);
   useCancelSocketLive(currentOrderId);
 
-  useEffect(() => {
-    if (!currentOrderId) return;
-    const s = getSocket();
+ useEffect(() => {
+  if (!currentOrderId) return;
+  const s = getSocket();
 
-    const onNewBatch = (p: {
-      orderId: string;
-      note?: string | null;
-      priority?: boolean;
-      source?: string;
-    }) => {
-      if (p.orderId !== currentOrderId) return;
-      setOrderNote(p.note ?? '');
-      setIsPriority(!!p.priority);
-    };
+  const onNewBatch = (p: {
+    orderId: string;
+    note?: string | null;
+    priority?: boolean;
+    source?: string;
+  }) => {
+    if (p.orderId !== currentOrderId) return;
 
-    s.on('kitchen:new_batch', onNewBatch);
-    return () => {
-      s.off('kitchen:new_batch', onNewBatch);
-    };
-  }, [currentOrderId]);
+    // chỉ sync lại ghi chú từ bếp (nếu có)
+    setOrderNote(p.note ?? '');
+    // ❌ KHÔNG setIsPriority ở đây, kẻo nó ghi đè lại ưu tiên mình đang chọn
+    // setIsPriority(!!p.priority);
+  };
+
+  s.on('kitchen:new_batch', onNewBatch);
+  return () => {
+    s.off('kitchen:new_batch', onNewBatch);
+  };
+}, [currentOrderId]);
+
 
   useEffect(() => {
     if (!currentOrderId) return;
@@ -263,12 +278,13 @@ export default function OrderScreen() {
                 }}
               >
                 <Chip
+               
                   label={
                     itemNote
                       ? `Ghi chú: ${itemNote.slice(0, 10)}${
                           itemNote.length > 10 ? '…' : ''
                         }`
-                      : 'Thêm ghi chú món'
+                      : 'Ghi chú'
                   }
                 />
               </Pressable>
@@ -385,7 +401,7 @@ export default function OrderScreen() {
           )}
         </View>
 
-        <View style={tw`ml-2 mt-1`}>
+        {/* <View style={tw`ml-2 mt-1`}>
           <Pressable onPress={() => setOrderNoteModalOpen(true)}>
             <Chip
               label={
@@ -399,7 +415,7 @@ export default function OrderScreen() {
               }
             />
           </Pressable>
-        </View>
+        </View> */}
       </View>
 
       {/* Danh sách món */}
@@ -425,9 +441,9 @@ export default function OrderScreen() {
             params: { id: tableId as string, name },
           });
         }}
-        style={tw`absolute right-5 bottom-26 h-14 w-14 rounded-full bg-blue-600 items-center justify-center shadow`}
+        style={tw`absolute right-5 bottom-26 h-14 w-14 rounded-full bg-blue-600 items-center justify-center shadow z-100`}
       >
-        <Text style={tw`text-white text-2xl`}>＋</Text>
+        <Text style={tw`text-white text-2xl `}>＋</Text>
       </Pressable>
 
       {/* Thanh đáy */}
@@ -440,24 +456,32 @@ export default function OrderScreen() {
         </View>
 
         <View style={tw`flex-row gap-3`}>
-          <Pressable
-            onPress={() =>
-              onNotify({
-                tableName: name || String(tableId),
-                note: orderNote.trim() || undefined,
-                priority: isPriority,
-                source: 'waiter',
-              })
-            }
-            disabled={!canNotify || notifying}
-            style={tw`flex-1 h-12 rounded-xl border border-blue-600 items-center justify-center ${
-              !canNotify || notifying ? 'opacity-50' : ''
-            }`}
-          >
-            <Text style={tw`text-blue-600 font-bold`}>
-              {notifying ? 'Đang gửi...' : 'Thông báo'}
-            </Text>
-          </Pressable>
+  <Pressable
+  onPress={async () => {
+    await onNotify({
+      tableName: name || String(tableId),
+      note: orderNote.trim() || undefined,
+      priority: isPriority,   // gửi ưu tiên lên BE
+      source: 'waiter',
+    });
+
+    // ⬇️ gửi xong thì reset trạng thái cho "lần sau"
+    setIsPriority(false);   // bỏ trạng thái ưu tiên
+    setFlaggedIds([]);      // ⭐ xoá hết món đã đánh sao → nút sao "ẩn" hết
+  }}
+  disabled={!canNotify || notifying}
+  style={tw`flex-1 h-12 rounded-xl border border-blue-600 items-center justify-center ${
+    !canNotify || notifying ? 'opacity-50' : ''
+  }`}
+>
+  <Text style={tw`text-blue-600 font-bold`}>
+    {notifying ? 'Đang gửi...' : 'Thông báo'}
+  </Text>
+</Pressable>
+
+
+ 
+
         </View>
       </View>
 

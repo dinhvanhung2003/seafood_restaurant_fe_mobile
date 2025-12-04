@@ -4,7 +4,6 @@ import { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, Text, View } from 'react-native';
 import DrawerItem from './DrawerItem';
 
-
 function SideDrawer({
   open,
   name,
@@ -35,49 +34,56 @@ function SideDrawer({
   return (
     <>
       {/* Overlay tap để đóng */}
-      <Animated.View pointerEvents={open ? 'auto' : 'none'} style={[tw`absolute inset-0 bg-black`, { opacity: overlayOpacity }]}>
+      <Animated.View
+        pointerEvents={open ? 'auto' : 'none'}
+        style={[tw`absolute inset-0 bg-black`, { opacity: overlayOpacity }]}
+      >
         <Pressable style={tw`flex-1`} onPress={onClose} />
       </Animated.View>
 
       {/* Panel */}
-      <Animated.View style={[tw`absolute top-0 bottom-0 left-0 bg-white shadow-lg`, { width: WIDTH, transform: [{ translateX }] }]}>
+      <Animated.View
+        style={[
+          tw`absolute top-0 bottom-0 left-0 bg-white shadow-lg`,
+          { width: WIDTH, transform: [{ translateX }] },
+        ]}
+      >
         <View style={tw`pt-12 pb-4 px-4 border-b border-slate-100`}>
-          <Text style={tw`text-xl font-extrabold text-slate-900`}>Seafood POS</Text>
+          <Text style={tw`text-xl font-extrabold text-slate-900`}>Seafood Restaurant</Text>
           <Text style={tw`mt-1 text-slate-600`}>{name ?? 'Nhân viên'}</Text>
         </View>
 
         <View style={tw`px-2 py-3`}>
           <DrawerItem label="Trang chủ" onPress={onClose} />
-          {/* <DrawerItem label="Đơn hiện tại" onPress={onClose} /> */}
-          {/* <DrawerItem label="Cài đặt" onPress={onClose} /> */}
 
-         <DrawerItem
-  label="Chấm công"
-  onPress={() => {
-    onClose();
-router.push({ pathname: '/(app)/profile/atttendance' } as never);
+          {/* 👉 Thông tin cá nhân */}
+          <DrawerItem
+            label="Thông tin cá nhân"
+            onPress={() => {
+              onClose();
+              router.push({ pathname: '/(app)/profile/info' } as never);
+            }}
+          />
 
-  }}
-/>
-<DrawerItem
-  label="Bảng chấm công"
-  onPress={() => {
-    onClose();
-    router.push({ pathname: "/(app)/profile/atttendance/list" } as never);
-  }}
-/>
-<DrawerItem
-  label="Đăng ký khuôn mặt"
-  onPress={() => {
-    onClose();
-    router.push({ pathname: "/(app)/profile/face" } as never);
-  }}
-/>
-          <DrawerItem label="Đổi mật khẩu" onPress={onClose} />
+          <DrawerItem
+            label="Chấm công"
+            onPress={() => {
+              onClose();
+              router.push({ pathname: '/(app)/profile/atttendance' } as never);
+            }}
+          />
+          <DrawerItem
+            label="Bảng chấm công"
+            onPress={() => {
+              onClose();
+              router.push({ pathname: '/(app)/profile/atttendance/list' } as never);
+            }}
+          />
+
+          {/* <DrawerItem label="Đổi mật khẩu" onPress={onClose} /> */}
           <DrawerItem label="Đăng xuất" onPress={onLogout} />
         </View>
       </Animated.View>
-
     </>
   );
 }

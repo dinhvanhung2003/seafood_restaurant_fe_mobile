@@ -1,7 +1,9 @@
+import NetInfo from "@react-native-community/netinfo";
 import { Picker } from "@react-native-picker/picker";
 import * as Location from "expo-location";
 import * as Network from "expo-network";
 import { useEffect, useMemo, useRef, useState } from "react";
+
 import {
   ActivityIndicator,
   Animated,
@@ -24,7 +26,12 @@ const toYMD = (d = new Date()) => {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 };
+type ChallengeType = "TURN_LEFT" | "TURN_RIGHT" | "LOOK_UP";
 
+type FaceShotResult = {
+  frames: string[];       // base64 của 2–3 ảnh
+  challenge: ChallengeType;
+};
 const nowHHmm = (d = new Date()) =>
   d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -44,6 +51,8 @@ export default function MobileAttendanceScreen() {
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | undefined>(
     undefined,
   );
+const [challenge, setChallenge] = useState<ChallengeType | null>(null);
+const faceResultRef = useRef<FaceShotResult | null>(null);
 
   // Auto chọn ca đầu tiên
   useEffect(() => {
@@ -124,38 +133,68 @@ export default function MobileAttendanceScreen() {
       showToast("Bạn chưa đăng ký khuôn mặt.");
       return;
     }
+const challenges: ChallengeType[] = ["TURN_LEFT", "TURN_RIGHT", "LOOK_UP"];
+  const ch = challenges[Math.floor(Math.random() * challenges.length)];
+  setChallenge(ch);
+//   // 0) Chụp khuôn mặt
+//   // 0) Chụp khuôn mặt
+// faceB64Ref.current = null;
 
-  // 0) Chụp khuôn mặt
-  // 0) Chụp khuôn mặt
-faceB64Ref.current = null;
+// // Mở modal và CHỜ ảnh qua Promise
+// const b64 = await new Promise<string | null>((resolve) => {
+//   setFaceOpen(() => true);
 
-// Mở modal và CHỜ ảnh qua Promise
-const b64 = await new Promise<string | null>((resolve) => {
-  setFaceOpen(() => true);
+//   // timeout 15s nếu user không chụp
+//   const t = setTimeout(() => resolve(null), 15000);
 
-  // timeout 15s nếu user không chụp
-  const t = setTimeout(() => resolve(null), 15000);
+//   // sửa FaceModal.onShot để resolve
+//   const unsub = () => {
+//     clearTimeout(t);
+//     resolve(faceB64Ref.current);
+//   };
 
-  // sửa FaceModal.onShot để resolve
-  const unsub = () => {
+//   faceB64Ref.current = null;
+
+//   // Gán hook để gọi resolve sau khi modal onShot hoặc onClose
+//   (globalThis as any).__ATT_FACE_RESOLVE__ = unsub;
+// });
+
+// setFaceOpen(false);
+
+// if (!b64) {
+//   showToast("Bạn chưa chụp khuôn mặt.");
+//   return;
+// }
+
+// faceB64Ref.current = b64;
+// 0) Chụp khuôn mặt + liveness
+const faceRes = await new Promise<FaceShotResult | null>((resolve) => {
+  // Mở modal
+  setFaceOpen(true);
+
+  // Timeout nếu user không thao tác
+  const t = setTimeout(() => {
+    resolve(null);
+  }, 20000);
+
+  // Hàm resolve sẽ được FaceModal gọi
+  (globalThis as any).__ATT_FACE_RESOLVE__ = (res: FaceShotResult | null) => {
     clearTimeout(t);
-    resolve(faceB64Ref.current);
+    resolve(res);
   };
-
-  faceB64Ref.current = null;
-
-  // Gán hook để gọi resolve sau khi modal onShot hoặc onClose
-  (globalThis as any).__ATT_FACE_RESOLVE__ = unsub;
 });
 
+// Đóng modal
 setFaceOpen(false);
 
-if (!b64) {
-  showToast("Bạn chưa chụp khuôn mặt.");
+// Kiểm tra kết quả
+if (!faceRes || !faceRes.frames || faceRes.frames.length === 0) {
+  showToast("Bạn chưa hoàn tất chụp khuôn mặt.");
   return;
 }
 
-faceB64Ref.current = b64;
+// Lưu lại frame để gửi lên BE
+faceResultRef.current = faceRes;
 
 
     // 1) Location service
@@ -196,26 +235,49 @@ faceB64Ref.current = b64;
     }
 
     // 4) Network
-    const net = await Network.getNetworkStateAsync();
-    if (!net.isConnected) {
-      showToast("Thiết bị đang offline.");
-      return;
-    }
-    const netType = `${net.type ?? "unknown"}`;
+   // 4) Network
+const netState = await Network.getNetworkStateAsync();
+if (!netState.isConnected) {
+  showToast("Thiết bị đang offline.");
+  return;
+}
+
+// Map đúng union 'wifi' | 'cellular' | 'unknown'
+let netType: "wifi" | "cellular" | "unknown" = "unknown";
+if (netState.type === Network.NetworkStateType.WIFI) {
+  netType = "wifi";
+} else if (netState.type === Network.NetworkStateType.CELLULAR) {
+  netType = "cellular";
+}
+
+// (Tuỳ chọn) Lấy SSID/BSSID – cần NetInfo + quyền Location
+let ssid: string | null = null;
+let bssid: string | null = null;
+try {
+  const netInfo = await NetInfo.fetch();
+  ssid = (netInfo.details as any)?.ssid ?? null;
+  bssid = (netInfo.details as any)?.bssid ?? null;
+} catch {
+  // im lặng, không lỗi cũng được
+}
+
 
     // 5) Gọi API chấm công
     setCheckingType(type);
     try {
-      const result = await checkAttendance({
-        lat: +pos.coords.latitude,
-        lng: +pos.coords.longitude,
-        accuracy: Math.round(pos.coords.accuracy || 0),
-        clientTs: Date.now(),
-        netType,
-        checkType: type,
-        scheduleId: selectedScheduleId,
-        imageBase64: faceB64Ref.current!,
-      } as any);
+  const result = await checkAttendance({
+  lat: +pos.coords.latitude,
+  lng: +pos.coords.longitude,
+  accuracy: Math.round(pos.coords.accuracy || 0),
+  clientTs: Date.now(),
+  netType,                     
+  ssid,                      
+  bssid,                     
+  checkType: type,
+  scheduleId: selectedScheduleId,
+  imagesBase64: faceResultRef.current!.frames,
+  challenge: faceResultRef.current!.challenge,
+} as any);
 
       if (result?.ok) {
         setSuccess({
@@ -382,18 +444,26 @@ faceB64Ref.current = b64;
       ) : null}
 
       {/* Modal chụp khuôn mặt */}
-      <FaceModal
-        visible={faceOpen}
-        onClose={() => setFaceOpen(false)}
-       onShot={(b64) => {
-  faceB64Ref.current = b64;
-  if ((globalThis as any).__ATT_FACE_RESOLVE__) {
-    (globalThis as any).__ATT_FACE_RESOLVE__();
-    (globalThis as any).__ATT_FACE_RESOLVE__ = null;
-  }
-  setFaceOpen(false);
-}}
-      />
+   <FaceModal
+  visible={faceOpen}
+  challenge={challenge}          // NEW
+  onClose={() => {
+    if ((globalThis as any).__ATT_FACE_RESOLVE__) {
+      (globalThis as any).__ATT_FACE_RESOLVE__(null);
+      (globalThis as any).__ATT_FACE_RESOLVE__ = null;
+    }
+    setFaceOpen(false);
+  }}
+  onShot={(res: FaceShotResult) => {
+    faceResultRef.current = res;
+    if ((globalThis as any).__ATT_FACE_RESOLVE__) {
+      (globalThis as any).__ATT_FACE_RESOLVE__(res);
+      (globalThis as any).__ATT_FACE_RESOLVE__ = null;
+    }
+    setFaceOpen(false);
+  }}
+/>
+
 
       {/* Modal xác nhận */}
       {success && (

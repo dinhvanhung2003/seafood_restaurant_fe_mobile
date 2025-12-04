@@ -28,16 +28,26 @@ const TABS: { key: StatusTab; label: string }[] = [
 
 export default function TablesScreen() {
   const router = useRouter();
-  const { logout } = useAuth();
+  const {profile, logout } = useAuth();
   useTableSocketLive();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [q, setQ] = useState('');
   const [statusTab, setStatusTab] = useState<StatusTab>('all');
   const [floor, setFloor] = useState('Tất cả');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-
+  const [onlyMine, setOnlyMine] = useState(false);
   const areasQ = useAreas();
   const { orders, activeOrdersQuery, amountByTable } = useOrders();
+const ownerByTable = useMemo<Record<string, string | undefined>>(() => {
+  const rows: any[] = activeOrdersQuery?.data ?? [];
+  const dict: Record<string, string> = {};
+  for (const o of rows) {
+    const tid = o.table?.id ?? o.tableId;
+    const uid = o.createdBy?.id;
+    if (tid && uid) dict[tid] = uid;
+  }
+  return dict;
+}, [activeOrdersQuery?.data]);
 
   const areas = areasQ.data ?? [];
 
@@ -55,64 +65,104 @@ export default function TablesScreen() {
     }
     return dict;
   }, [activeOrdersQuery?.data]);
-
+ const currentUserId = profile?.userId ?? null;
   const tables = useMemo<TableVM[]>(() => {
-    const list: TableVM[] = [];
-    for (const a of areas ?? []) {
-      for (const t of a.tables ?? []) {
-        const using = !!orders[t.id];
-        list.push({
-          id: t.id,
-          name: t.name,
-          floor: a.name,
-          status: using ? 'using' : 'empty',
-          amount: using ? (amountByTable[t.id] ?? 0) : 0,
-          startedAt: orderCreatedAt[t.id],
-        });
-      }
+  const list: TableVM[] = [];
+  for (const a of areas ?? []) {
+    for (const t of a.tables ?? []) {
+      const ordForTable: any = (orders as any)[t.id]; // order đang active ở bàn này
+      const using = !!ordForTable;
+
+      list.push({
+        id: t.id,
+        name: t.name,
+        floor: a.name,
+        status: using ? "using" : "empty",
+        amount: using ? (amountByTable[t.id] ?? 0) : 0,
+        // ƯU TIÊN lấy từ orders (trước giờ vẫn đúng),
+        // nếu không có thì mới dùng createdAt từ activeOrdersQuery
+        startedAt:
+          (ordForTable && (ordForTable.startedAt || ordForTable.createdAt)) ??
+          orderCreatedAt[t.id],
+        isMine: using && ownerByTable[t.id] === currentUserId,
+      });
     }
-    return list;
-  }, [areas, orders, orderCreatedAt, amountByTable]);
+  }
+  return list;
+}, [
+  areas,
+  orders,
+  amountByTable,
+  ownerByTable,
+  currentUserId,
+  orderCreatedAt,
+]);
 
   const filtered = useMemo(() => {
-    const kw = stripVN(q.trim().toLowerCase());
-    return tables.filter((t) => {
-      const okFloor = floor === 'Tất cả' || t.floor === floor;
-      const okStatus =
-        statusTab === 'all' ? true : statusTab === 'using' ? t.status === 'using' : t.status === 'empty';
-      const okKeyword =
-        !kw ||
-        stripVN(t.name.toLowerCase()).includes(kw) ||
-        stripVN((t.floor ?? '').toLowerCase()).includes(kw);
-      return okFloor && okStatus && okKeyword;
-    });
-  }, [tables, floor, statusTab, q]);
+  const kw = stripVN(q.trim().toLowerCase());
+  return tables.filter((t) => {
+    const okFloor = floor === 'Tất cả' || t.floor === floor;
+    const okStatus =
+      statusTab === 'all'
+        ? true
+        : statusTab === 'using'
+        ? t.status === 'using'
+        : t.status === 'empty';
+    const okKeyword =
+      !kw ||
+      stripVN(t.name.toLowerCase()).includes(kw) ||
+      stripVN((t.floor ?? '').toLowerCase()).includes(kw);
+
+    const okOwner = !onlyMine || t.isMine;   // 👈 nếu bật “Đơn của tôi” thì chỉ lấy bàn isMine
+
+    return okFloor && okStatus && okKeyword && okOwner;
+  });
+}, [tables, floor, statusTab, q, onlyMine]);
+
 
   const goTable = (t: TableVM) => {
     setSelectedId(t.id);
     router.push({ pathname: '/(app)/table/[id]', params: { id: t.id, name: t.name } });
   };
 
-  const renderTable = ({ item }: { item: TableVM }) => {
-    const isSelected = selectedId === item.id;
-    const using = item.status === 'using';
-    const border = using ? (isSelected ? 'border-blue-500' : 'border-blue-300') : 'border-slate-200';
-    const bg = using ? 'bg-blue-100' : 'bg-white';
+ const renderTable = ({ item }: { item: TableVM }) => {
+  const isSelected = selectedId === item.id;
+  const using = item.status === 'using';
+  const border = using ? (isSelected ? 'border-blue-500' : 'border-blue-300') : 'border-slate-200';
+  const bg = using ? 'bg-blue-100' : 'bg-white';
 
-    return (
-      <Pressable onPress={() => goTable(item)} style={tw`m-2 w-[46%] rounded-2xl border ${border} ${bg} px-4 py-4`}>
-        <Text style={tw`text-base font-bold text-slate-900`}>{item.name}</Text>
-        {using ? (
-          <>
-            <Text style={tw`mt-2 text-slate-500`}>{fmtElapsed(item.startedAt)}</Text>
-            <Text style={tw`mt-1 text-blue-600 font-semibold`}>{fmtMoney(item.amount ?? 0)}</Text>
-          </>
-        ) : (
-          <Text style={tw`mt-2 text-slate-400`}>Trống</Text>
-        )}
-      </Pressable>
-    );
-  };
+  return (
+    <Pressable
+      onPress={() => goTable(item)}
+      style={tw`relative m-2 w-[46%] rounded-2xl border ${border} ${bg} px-4 py-4`}  // 👈 thêm relative
+    >
+      {/* tick góc phải nếu là đơn của mình */}
+      {item.isMine && (
+        <View
+          style={tw`absolute top-2 right-2 w-5 h-5 rounded-full bg-green-500 items-center justify-center`}
+        >
+          <Text style={tw`text-white text-xs`}>✓</Text>
+        </View>
+      )}
+
+      <Text style={tw`text-base font-bold text-slate-900`}>{item.name}</Text>
+    {using ? (
+  <>
+    <Text style={tw`mt-2 text-slate-500`}>
+      {item.startedAt ? fmtElapsed(item.startedAt) : "Đang phục vụ"}
+    </Text>
+    <Text style={tw`mt-1 text-blue-600 font-semibold`}>
+      {fmtMoney(item.amount ?? 0)}
+    </Text>
+  </>
+) : (
+  <Text style={tw`mt-2 text-slate-400`}>Trống</Text>
+)}
+
+    </Pressable>
+  );
+};
+
 
   return (
     <View style={tw`flex-1 bg-white mt-10`}>
@@ -145,6 +195,23 @@ export default function TablesScreen() {
           })}
         </View>
       </View>
+{/* Filter "Đơn của tôi" */}
+<View style={tw`px-4 mb-2`}>
+  <Pressable
+    onPress={() => setOnlyMine((v) => !v)}
+    style={tw.style(
+      'self-start flex-row items-center px-3 h-8 rounded-full border',
+      onlyMine ? 'bg-green-50 border-green-400' : 'bg-white border-slate-200'
+    )}
+  >
+    <Text style={tw`${onlyMine ? 'text-green-700' : 'text-slate-700'} text-sm font-medium`}>
+      Đơn của tôi
+    </Text>
+    {onlyMine && (
+      <Text style={tw`ml-1 text-green-700 text-sm`}>✓</Text>
+    )}
+  </Pressable>
+</View>
 
       {/* Floor chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={tw`px-4 pb-3 mb-2 gap-2`}>
@@ -165,12 +232,12 @@ export default function TablesScreen() {
       {/* Quick actions */}
       <View style={tw`px-3`}>
         <View style={tw`flex-row`}>
-          <Pressable style={tw`flex-1 m-2 rounded-2xl border border-slate-200 bg-white px-4 py-6`}>
+          {/* <Pressable style={tw`flex-1 m-2 rounded-2xl border border-slate-200 bg-white px-4 py-6`}>
             <Text style={tw`text-base font-semibold`}>🧺  Mang về</Text>
           </Pressable>
           <Pressable style={tw`flex-1 m-2 rounded-2xl border border-slate-200 bg-white px-4 py-6`}>
             <Text style={tw`text-base font-semibold`}>🚚  Giao đi</Text>
-          </Pressable>
+          </Pressable> */}
         </View>
       </View>
 
@@ -197,7 +264,7 @@ export default function TablesScreen() {
 
       <SideDrawer
         open={drawerOpen}
-        name="Thu ngân"
+       name={profile?.displayName || 'Nhân viên'}
         onClose={() => setDrawerOpen(false)}
         onLogout={async () => {
           setDrawerOpen(false);

@@ -14,12 +14,17 @@ export type ShiftToday = {
   attStatus?: "MISSING" | "ON_TIME" | "LATE" | string | null;
 };
 
-
+export function toLocalDateISO(d: Date) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 export async function fetchTodayShifts(dateISO?: string): Promise<ShiftToday[]> {
-  const date = dateISO ?? new Date().toISOString().slice(0, 10);
+  const date = dateISO ?? toLocalDateISO(new Date());   // ⬅️ đổi ở đây
   const res = await http.get<ShiftToday[]>("/schedules/today/me", { params: { date } });
   return res.data ?? [];
-} 
+}
 export type WeekScheduleRow = {
   scheduleId: string;
   userId: string;
@@ -75,10 +80,11 @@ import { useMutation } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 
 export function useTodayShifts(dateISO?: string) {
+  const keyDate = dateISO ?? toLocalDateISO(new Date()); // ⬅️ tránh lệch ngày ở queryKey
   return useQuery({
-    queryKey: ["todayShifts", dateISO ?? new Date().toISOString().slice(0,10)],
+    queryKey: ["todayShifts", keyDate],
     queryFn: () => fetchTodayShifts(dateISO),
-    staleTime: 60_000, // 1 phút
+    staleTime: 60_000,
   });
 }
 

@@ -5,4 +5,5 @@ export type TableVM = {
   status: 'using' | 'empty';
   amount: number;
   startedAt?: string;
+    isMine?: boolean;  
 };

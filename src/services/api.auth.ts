@@ -8,7 +8,8 @@ export type Profile = {
   email?: string;        // user.email
   role?: string;         // user.role
   avatar?: string;       // data.avatar
-  employeeCode?: string; // hiện BE chưa trả -> sẽ undefined
+  employeeCode?: string;
+  userId: string;
 };
 
 /** ===== Kiểu response /profile/me đúng JSON thực tế ===== */
@@ -46,10 +47,12 @@ type MeResponse = {
 };
 
 /** Chuẩn hoá response -> Profile gọn cho app */
+/** Chuẩn hoá response -> Profile gọn cho app */
 function normalizeProfile(resp: MeResponse): Profile {
   const d = resp.data;
   return {
-    id: d.user?.id ?? d.id,
+    id: d.user?.id ?? d.id,        // tuỳ bạn muốn id = user.id hay profile.id
+    userId: d.user?.id ?? d.id,    // 👈 THÊM DÒNG NÀY
     displayName: d.fullName ?? "",
     email: d.user?.email ?? undefined,
     role: d.user?.role ?? undefined,
@@ -57,6 +60,7 @@ function normalizeProfile(resp: MeResponse): Profile {
     employeeCode: undefined, // backend hiện chưa trả mã NV
   };
 }
+
 
 export const AuthAPI = {
   async login(body: LoginBody): Promise<Tokens> {
