@@ -1,6 +1,7 @@
 import { useTableSocketLive } from '@hooks/socket/socket/useTableSocketLive';
 import { useAreas } from '@hooks/useArea';
 import { useOrders } from '@hooks/useOrder';
+import { fmtElapsed, fmtMoney, stripVN } from "@lib/heplers/TableHelper";
 import tw from '@lib/tw';
 import { useAuth } from '@providers/AuthProvider';
 import { useRouter } from 'expo-router';
@@ -15,7 +16,7 @@ import {
 } from 'react-native';
 import SideDrawer from '../../src/components/drawer/SideDrawer';
 import HeaderBar from '../../src/components/table/HeaderBar';
-import { fmtElapsed, fmtMoney, stripVN } from '../../src/lib/heplers/TableHelper';
+
 import { TableVM } from '../../src/types/table/TableType';
 
 type StatusTab = 'all' | 'using' | 'empty';
@@ -262,15 +263,13 @@ const ownerByTable = useMemo<Record<string, string | undefined>>(() => {
         </View>
       )}
 
-      <SideDrawer
-        open={drawerOpen}
-       name={profile?.displayName || 'Nhân viên'}
-        onClose={() => setDrawerOpen(false)}
-        onLogout={async () => {
-          setDrawerOpen(false);
-          await logout();
-        }}
-      />
+    <SideDrawer
+  open={drawerOpen}
+  name={profile?.displayName}
+  tableId={selectedId ?? undefined}
+  onClose={() => setDrawerOpen(false)}
+  onLogout={logout}
+/>
     </View>
   );
 }

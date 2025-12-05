@@ -9,11 +9,15 @@ function SideDrawer({
   name,
   onClose,
   onLogout,
+  tableId,  
+       tableName,      
 }: {
   open: boolean;
   name?: string;
   onClose: () => void;
   onLogout: () => void | Promise<void>;
+  tableId?: string;     
+  tableName?: string;
 }) {
   const slide = useRef(new Animated.Value(0)).current; // 0: đóng, 1: mở
   const router = useRouter();
@@ -56,6 +60,20 @@ function SideDrawer({
         <View style={tw`px-2 py-3`}>
           <DrawerItem label="Trang chủ" onPress={onClose} />
 
+          {/* 👉 Lịch sử huỷ bàn hiện tại (chỉ khi có tableId) */}
+          {tableId && (
+      <DrawerItem
+        label="Lịch sử hủy món"
+        onPress={() => {
+          onClose();
+          router.push({
+            pathname: '/(app)/void-history/[tableId]',
+            params: { tableId, tableName: tableName ?? '' },
+          } as never);
+        }}
+      />
+    )}
+
           {/* 👉 Thông tin cá nhân */}
           <DrawerItem
             label="Thông tin cá nhân"
@@ -80,7 +98,6 @@ function SideDrawer({
             }}
           />
 
-          {/* <DrawerItem label="Đổi mật khẩu" onPress={onClose} /> */}
           <DrawerItem label="Đăng xuất" onPress={onLogout} />
         </View>
       </Animated.View>

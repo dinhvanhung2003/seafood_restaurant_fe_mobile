@@ -58,9 +58,9 @@ export default function LoginScreen() {
           Đăng nhập
         </Text>
         <View style={tw`mb-3`}>
-          <Text style={tw`mb-2 text-sm text-gray-600`}>Tên đăng nhập</Text>
+          <Text style={tw`mb-2 text-sm text-gray-600`}>Email</Text>
           <TextInput
-            placeholder="Email / SĐT"
+            placeholder="Email"
             placeholderTextColor="#9CA3AF"
             value={username}
             onChangeText={setUsername}

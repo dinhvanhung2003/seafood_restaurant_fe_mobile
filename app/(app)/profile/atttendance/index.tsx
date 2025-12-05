@@ -136,38 +136,6 @@ const faceResultRef = useRef<FaceShotResult | null>(null);
 const challenges: ChallengeType[] = ["TURN_LEFT", "TURN_RIGHT", "LOOK_UP"];
   const ch = challenges[Math.floor(Math.random() * challenges.length)];
   setChallenge(ch);
-//   // 0) Chụp khuôn mặt
-//   // 0) Chụp khuôn mặt
-// faceB64Ref.current = null;
-
-// // Mở modal và CHỜ ảnh qua Promise
-// const b64 = await new Promise<string | null>((resolve) => {
-//   setFaceOpen(() => true);
-
-//   // timeout 15s nếu user không chụp
-//   const t = setTimeout(() => resolve(null), 15000);
-
-//   // sửa FaceModal.onShot để resolve
-//   const unsub = () => {
-//     clearTimeout(t);
-//     resolve(faceB64Ref.current);
-//   };
-
-//   faceB64Ref.current = null;
-
-//   // Gán hook để gọi resolve sau khi modal onShot hoặc onClose
-//   (globalThis as any).__ATT_FACE_RESOLVE__ = unsub;
-// });
-
-// setFaceOpen(false);
-
-// if (!b64) {
-//   showToast("Bạn chưa chụp khuôn mặt.");
-//   return;
-// }
-
-// faceB64Ref.current = b64;
-// 0) Chụp khuôn mặt + liveness
 const faceRes = await new Promise<FaceShotResult | null>((resolve) => {
   // Mở modal
   setFaceOpen(true);
@@ -261,66 +229,91 @@ try {
   // im lặng, không lỗi cũng được
 }
 
-
-    // 5) Gọi API chấm công
-    setCheckingType(type);
-    try {
+// 5) Gọi API chấm công
+setCheckingType(type);
+try {
   const result = await checkAttendance({
-  lat: +pos.coords.latitude,
-  lng: +pos.coords.longitude,
-  accuracy: Math.round(pos.coords.accuracy || 0),
-  clientTs: Date.now(),
-  netType,                     
-  ssid,                      
-  bssid,                     
-  checkType: type,
-  scheduleId: selectedScheduleId,
-  imagesBase64: faceResultRef.current!.frames,
-  challenge: faceResultRef.current!.challenge,
-} as any);
+    lat: +pos.coords.latitude,
+    lng: +pos.coords.longitude,
+    accuracy: Math.round(pos.coords.accuracy || 0),
+    clientTs: Date.now(),
+    netType,
+    ssid,
+    bssid,
+    checkType: type,
+    scheduleId: selectedScheduleId,
+    imagesBase64: faceResultRef.current!.frames,
+    challenge: faceResultRef.current!.challenge,
+  } as any);
 
-      if (result?.ok) {
-        setSuccess({
-          type,
-          time:
-            now.toLocaleTimeString("vi-VN", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }) +
-            " " +
-            now.toLocaleDateString("vi-VN"),
-        });
-        refetch();
-      } else if (result?.verify === "FAIL_FACE") {
-  // 🔍 Đọc thêm reason + score để biết vì sao fail
-  const reason = (result as any).reason;
-  const score = (result as any).score;
+  console.log("DEBUG checkAttendance result:", result);
 
-  if (reason === "NO_MATCH") {
-    showToast("❌ Hệ thống không tìm thấy khuôn mặt của bạn.\nThử chụp lại rõ hơn, đủ sáng nhé.");
-  } else if (reason === "LOW_SCORE") {
-    showToast(
-      `❌ Độ khớp khuôn mặt chỉ ~${Math.round(score || 0)}% (< ngưỡng).\nThử chụp gần hơn, ít che mặt hơn.`
-    );
-  } else if (reason === "DIFF_USER") {
-    showToast("❌ Khuôn mặt không trùng với tài khoản đăng nhập.");
+  if (result?.ok) {
+    // ✅ Thành công
+    setSuccess({
+      type,
+      time:
+        now.toLocaleTimeString("vi-VN", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }) +
+        " " +
+        now.toLocaleDateString("vi-VN"),
+    });
+    refetch();
+    showToast("✅ Chấm công thành công!");
   } else {
-    showToast("❌ Lỗi xác thực khuôn mặt, vui lòng thử lại.");
-  }
-      } else if (result?.verify === "FAIL_GPS") {
-        showToast("❌ Không ở trong vùng GPS.");
-      } else if (result?.verify === "FAIL_WIFI") {
-        showToast("❌ Không đúng Wi-Fi/IP.");
-      } else {
-        showToast("❌ Không hợp lệ.");
-      }
-    } catch (e: any) {
-      const s = e?.response?.status;
-      const m = e?.response?.data?.message ?? e?.message;
-      showToast(`⚠️ Lỗi ${s ?? ""} ${Array.isArray(m) ? m.join(", ") : m}`);
-    } finally {
-      setCheckingType(null);
+    const verify = result?.verify as string | undefined;
+    const reason = (result as any)?.reason as string | undefined;
+    const score = (result as any)?.score as number | undefined;
+
+    // Ưu tiên các lỗi “ngoại vi”
+    if (verify === "FAIL_GPS") {
+      showToast("❌ Không ở trong vùng GPS.");
+    } else if (verify === "FAIL_WIFI") {
+      showToast("❌ Không đúng Wi-Fi/IP.");
     }
+    // Lỗi khuôn mặt tổng quát, có reason chi tiết
+    else if (verify === "FAIL_FACE") {
+      if (reason === "NO_MATCH") {
+        showToast("❌ Hệ thống không tìm thấy khuôn mặt của bạn.\nThử chụp lại rõ hơn, đủ sáng nhé.");
+      } else if (reason === "LOW_SCORE") {
+        showToast(
+          `❌ Độ khớp khuôn mặt chỉ ~${Math.round(score || 0)}% (< ngưỡng).\nThử chụp gần hơn, ít che mặt hơn.`
+        );
+      } else if (reason === "DIFF_USER") {
+        showToast("❌ Khuôn mặt không trùng với tài khoản đăng nhập.");
+      } else if (reason === "NO_FACE" || reason === "IMAGE_EMPTY") {
+        showToast("❌ Không nhận diện được khuôn mặt.\nThử chụp lại rõ hơn nhé.");
+      } else {
+        showToast("❌ Lỗi xác thực khuôn mặt, vui lòng thử lại.");
+      }
+    }
+    // Phòng trường hợp BE trả trực tiếp verify = NO_FACE / LOW_SCORE / ...
+    else if (verify === "NO_FACE" || verify === "IMAGE_EMPTY") {
+      showToast("❌ Không nhận diện được khuôn mặt.");
+    } else if (verify === "LOW_SCORE") {
+      showToast(
+        `❌ Độ khớp khuôn mặt chỉ ~${Math.round(score || 0)}%.\nThử chụp gần hơn, ít che mặt hơn.`
+      );
+    } else if (verify === "DIFF_USER") {
+      showToast("❌ Đây không phải khuôn mặt của bạn.");
+    } else if (verify === "NO_MATCH") {
+      showToast("❌ Bạn chưa đăng ký khuôn mặt.");
+    } else if (verify === "ERROR") {
+      showToast("❌ Lỗi hệ thống khi xác thực khuôn mặt, vui lòng thử lại.");
+    } else {
+      // Fallback cho mọi case lạ
+      showToast("❌ Không hợp lệ.");
+    }
+  }
+} catch (e: any) {
+  const s = e?.response?.status;
+  const m = e?.response?.data?.message ?? e?.message;
+  showToast(`⚠️ Lỗi ${s ?? ""} ${Array.isArray(m) ? m.join(", ") : m}`);
+} finally {
+  setCheckingType(null);
+}
   }
 
   return (
