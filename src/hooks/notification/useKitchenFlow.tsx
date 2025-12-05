@@ -1,52 +1,72 @@
-// src/hooks/mobile/useKitchenFlow.ts
-import { useKitchenProgress } from '@hooks/useKitchenProgress'; // đã có ở web, tái dùng
-import { useOrders } from '@hooks/useOrder'; // mobile FE hook của bạn
-import { getSocket } from '@lib/socket';
+// src/hooks/notification/useKitchenFlow.tsx
+import { useKitchenProgress } from '@hooks/useKitchenProgress';
+import { useOrders } from '@hooks/useOrder';
 import api from '@services/http';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
 export type CancelTarget = { orderItemId: string; name: string; qty: number };
 
+type NotifyOpts = {
+  tableName: string;
+  note?: string;
+  priority?: boolean;
+  source?: 'cashier' | 'waiter' | 'other';
+};
+
 export function useKitchenFlow(selectedTableId?: string) {
   const qc = useQueryClient();
-  const s = getSocket();
   const { orders, orderIds, addOne, changeQty, activeOrdersQuery } = useOrders();
 
   const currentOrderId = selectedTableId ? orderIds[selectedTableId] : undefined;
-  const { data: progress = [] } = useKitchenProgress(currentOrderId);
-
-  // menuItemId -> tổng đã báo bếp
-  const notifiedMap = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of progress) m.set(r.menuItemId, r.notified);
-    return m;
-  }, [progress]);
 
   const activeItems = useMemo(() => {
     if (!selectedTableId || !orders[selectedTableId]) return [];
     const b = orders[selectedTableId];
-    const cur = b.orders.find((o) => o.id === b.activeId);
+    const cur = b.orders.find(o => o.id === b.activeId);
     return cur?.items ?? [];
   }, [orders, selectedTableId]);
+
+  const { data: progress = [] } = useKitchenProgress(currentOrderId);
+
+  const notifiedMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of progress as any[]) {
+      const prev = m.get(r.menuItemId) ?? 0;
+      m.set(r.menuItemId, prev + (Number(r.notified) || 0));
+    }
+    return m;
+  }, [progress]);
+
+  const cancellableMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of progress as any[]) {
+      const notified = Number(r.notified) || 0;
+      const preparing = Number(r.preparing) || 0;
+      const ready = Number(r.ready) || 0;
+      const served = Number(r.served) || 0;
+      const cancelable = Math.max(0, notified - preparing - ready - served);
+      const prev = m.get(r.menuItemId) ?? 0;
+      m.set(r.menuItemId, prev + cancelable);
+    }
+    return m;
+  }, [progress]);
+
+  const sentQty = (menuItemId: string) => notifiedMap.get(menuItemId) ?? 0;
+  const cancellableQty = (menuItemId: string) => cancellableMap.get(menuItemId) ?? 0;
 
   const deltaItems = useMemo(() => {
     if (!currentOrderId) return [];
     return activeItems
-      .map(i => {
-        const sent = notifiedMap.get(i.id) ?? 0;
+      .map((i: any) => {
+        const sent = sentQty(i.id);
         return { menuItemId: i.id, delta: Math.max(0, i.qty - sent) };
       })
       .filter(d => d.delta > 0);
-  }, [activeItems, notifiedMap, currentOrderId]);
+  }, [activeItems, currentOrderId, notifiedMap]);
 
-  const sentQty = (menuItemId: string) => notifiedMap.get(menuItemId) ?? 0;
-
-  // ====== Cancel modal state ======
   const [cancelOneOpen, setCancelOneOpen] = useState(false);
   const [cancelOne, setCancelOne] = useState<CancelTarget | null>(null);
-
-  // ====== Actions ======
 
   async function onAdd(menuItemId: string) {
     if (!selectedTableId) return;
@@ -55,10 +75,10 @@ export function useKitchenFlow(selectedTableId?: string) {
     if (!hadOrder) activeOrdersQuery.refetch?.();
   }
 
-  // chỉ giảm khi chưa báo bếp; nếu “đụng” phần đã báo ⇒ mở modal huỷ
-  async function onChangeQty(menuItemId: string, delta: number) {
+  async function onChangeQty(menuItemId: string, delta: number, menuName?: string) {
     if (!selectedTableId) return;
-    const it = activeItems.find(x => x.id === menuItemId);
+
+    const it: any = activeItems.find((x: any) => x.id === menuItemId);
     const cur = it?.qty ?? 0;
     const next = Math.max(0, cur + delta);
 
@@ -67,27 +87,33 @@ export function useKitchenFlow(selectedTableId?: string) {
       return;
     }
 
-    const alreadySent = sentQty(menuItemId);
+    const totalSent = sentQty(menuItemId);
+    const cancelable = cancellableQty(menuItemId);
+    const nonSent = Math.max(0, cur - totalSent);
 
     if (delta > 0) {
-      await onAdd(menuItemId); // thêm dòng mới để batch sau rõ ràng
+      await onAdd(menuItemId);
       return;
     }
 
-    // delta < 0
-    if (next >= alreadySent) {
-      // còn đủ phần chưa gửi để giảm
-      const reducible = cur - alreadySent;
+    if (next >= totalSent) {
+      const reducible = nonSent;
       const apply = Math.max(delta, -reducible);
-      if (apply !== 0) await changeQty(selectedTableId, menuItemId, apply, activeItems);
+      if (apply !== 0) {
+        await changeQty(selectedTableId, menuItemId, apply, activeItems as any);
+      }
       return;
     }
 
-    // cần huỷ phần đã báo
+    if (cancelable <= 0) {
+      console.log('Không thể huỷ thêm vì món đang chế biến hoặc đã ra.');
+      return;
+    }
+
     setCancelOne({
       orderItemId: it.rowId!,
-      name: '',
-      qty: alreadySent, // cho phép huỷ tối đa phần đã gửi
+      name: menuName ?? '',
+      qty: cancelable,
     });
     setCancelOneOpen(true);
   }
@@ -95,19 +121,20 @@ export function useKitchenFlow(selectedTableId?: string) {
   async function confirmCancelOne({ qty, reason }: { qty: number; reason: string }) {
     if (!cancelOne) return;
     try {
-      if (qty >= cancelOne.qty) {
-        await api.patch(`/orderitems/cancel`, { itemIds: [cancelOne.orderItemId], reason });
-      } else {
-        await api.patch(`/orderitems/cancel-partial`, { itemId: cancelOne.orderItemId, qty, reason });
-      }
+      await api.patch(`/orderitems/cancel-partial`, {
+        itemId: cancelOne.orderItemId,
+        qty,
+        reason,
+      });
 
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['active-orders'] }),
-        currentOrderId ? qc.invalidateQueries({ queryKey: ['kitchen-progress', currentOrderId] }) : Promise.resolve(),
+        currentOrderId
+          ? qc.invalidateQueries({ queryKey: ['kitchen-progress', currentOrderId] })
+          : Promise.resolve(),
       ]);
-    //   toast.success('Đã huỷ món');
-    } catch (e: any) {
-    //   toast.error('Huỷ món thất bại', { description: e?.response?.data?.message || e.message });
+    } catch (e) {
+      console.log('cancel error', e);
     } finally {
       setCancelOneOpen(false);
       setCancelOne(null);
@@ -115,52 +142,43 @@ export function useKitchenFlow(selectedTableId?: string) {
   }
 
   const [notifying, setNotifying] = useState(false);
-  const canNotify = !!currentOrderId && (deltaItems.length > 0);
+  const canNotify = !!currentOrderId && deltaItems.length > 0;
 
-  async function onNotify(tableName?: string) {
-    if (!currentOrderId) return
-    //  toast.error('Chưa có order!');
+  const onNotify = async (opts: NotifyOpts) => {
+    if (!currentOrderId) return;
     if (!canNotify || notifying) return;
 
+    setNotifying(true);
     try {
-      setNotifying(true);
       await api.post(`/kitchen/orders/${currentOrderId}/notify-items`, {
-        items: deltaItems, // [{ menuItemId, delta }]
-        priority: true,
-        tableName,
+        items: deltaItems,
+        tableName: opts.tableName,
+        priority: !!opts.priority,
+        note: opts.note ?? null,
+        source: opts.source ?? 'waiter', // default cho mobile
       });
 
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['kitchen-progress', currentOrderId] }),
-        qc.invalidateQueries({ queryKey: ['active-orders'] }),
+        qc.invalidateQueries({ queryKey: ['kitchen-history', currentOrderId] }),
       ]);
-
-      // báo socket (nếu BE dùng)
-      s.emit?.('cashier:notified', { orderId: currentOrderId });
-
-    //   toast.success('Đã gửi bếp!');
-    } catch (e: any) {
-    //   toast.error('Không thể gửi bếp', { description: e?.response?.data?.message || e.message });
     } finally {
       setNotifying(false);
     }
-  }
+  };
 
   return {
-    // data
     currentOrderId,
     activeItems,
     deltaItems,
     canNotify,
     notifying,
 
-    // cancel modal
     cancelOneOpen,
     cancelOne,
     setCancelOneOpen,
     confirmCancelOne,
 
-    // handlers
     onAdd,
     onChangeQty,
     onNotify,

@@ -1,8 +1,9 @@
 // app/(auth)/login.tsx
 import tw from "@lib/tw";
 
-import { useAuth } from '@providers/AuthProvider';
-import { useCallback, useMemo, useState } from 'react';
+import { useAuth } from "@providers/AuthProvider";
+import { useRouter } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,13 +12,13 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-} from 'react-native';
-import { showMessage } from 'react-native-flash-message';
+} from "react-native";
+import { showMessage } from "react-native-flash-message";
 
 export default function LoginScreen() {
   const { login, submitting } = useAuth();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [secure, setSecure] = useState(true);
 
   const canSubmit = useMemo(
@@ -32,30 +33,34 @@ export default function LoginScreen() {
 
     if (ok) {
       showMessage({
-        message: 'Đăng nhập thành công',
-        type: 'success',
+        message: "Đăng nhập thành công",
+        type: "success",
       });
       // Điều hướng sẽ do AuthGate ở app/_layout.tsx lo
     } else {
       showMessage({
-        message: 'Đăng nhập thất bại',
-        description: 'Vui lòng kiểm tra lại tài khoản/mật khẩu.',
-        type: 'danger',
+        message: "Đăng nhập thất bại",
+        description: "Vui lòng kiểm tra lại tài khoản/mật khẩu.",
+        type: "danger",
       });
     }
   }, [canSubmit, login, username, password]);
 
+  const router = useRouter();
+
   return (
     <KeyboardAvoidingView
       style={tw`flex-1 bg-white`}
-      behavior={Platform.select({ ios: 'padding', android: undefined })}
+      behavior={Platform.select({ ios: "padding", android: undefined })}
     >
       <View style={tw`flex-1 px-5 justify-center`}>
-        <Text style={tw`text-2xl font-bold text-gray-900 mb-2 text-center`}>Đăng nhập</Text>
+        <Text style={tw`text-2xl font-bold text-gray-900 mb-2 text-center`}>
+          Đăng nhập
+        </Text>
         <View style={tw`mb-3`}>
-          <Text style={tw`mb-2 text-sm text-gray-600`}>Tên đăng nhập</Text>
+          <Text style={tw`mb-2 text-sm text-gray-600`}>Email</Text>
           <TextInput
-            placeholder="Email / SĐT"
+            placeholder="Email"
             placeholderTextColor="#9CA3AF"
             value={username}
             onChangeText={setUsername}
@@ -86,7 +91,9 @@ export default function LoginScreen() {
               disabled={submitting}
               style={tw`absolute right-3 top-1/2 -translate-y-1/2 px-3 py-1 rounded-lg`}
             >
-              <Text style={tw`text-blue-600 font-semibold`}>{secure ? 'Hiện' : 'Ẩn'}</Text>
+              <Text style={tw`text-blue-600 font-semibold`}>
+                {secure ? "Hiện" : "Ẩn"}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -107,8 +114,17 @@ export default function LoginScreen() {
           )}
         </TouchableOpacity>
 
+        <TouchableOpacity
+          onPress={() => (router as any).push("/(auth)/forgot-password")}
+          style={tw`mt-4 items-center`}
+        >
+          <Text style={tw`text-blue-600 font-semibold`}>Quên mật khẩu?</Text>
+        </TouchableOpacity>
+
         <View style={tw`mt-6 items-center`}>
-          <Text style={tw`text-gray-500 text-xs`}>© {new Date().getFullYear()} Seafood Restaurant</Text>
+          <Text style={tw`text-gray-500 text-xs`}>
+            © {new Date().getFullYear()} Seafood Restaurant
+          </Text>
         </View>
       </View>
     </KeyboardAvoidingView>

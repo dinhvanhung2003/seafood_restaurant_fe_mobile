@@ -60,7 +60,7 @@ export default function HeaderBar({
             placeholder={searchPlaceholder}
             placeholderTextColor="#94a3b8"
             returnKeyType="search"
-            style={tw`flex-1 px-1 text-[16px]`}
+            style={tw`flex-1 px-1 py-1 text-[16px]`}
           />
           {searchValue ? (
             <Pressable onPress={onClearSearch} hitSlop={10}>

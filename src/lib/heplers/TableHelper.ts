@@ -13,14 +13,42 @@ export const minutesBetween = (iso?: string) => {
   return Math.max(0, Math.round(diff / 60000));
 };
 
-export const fmtElapsed = (iso?: string) => {
-  const m = minutesBetween(iso);
-  const h = Math.floor(m / 60),
-    mm = m % 60;
-  if (h <= 0 && mm <= 0) return '';
-  if (h <= 0) return `${mm}p`;
-  return `${h}g ${mm}p`;
-};
+export function fmtElapsed(iso?: string) {
+  if (!iso) return "";
+
+  // 1️⃣ Ưu tiên parse chuẩn ISO (có Z / +07:00 / .sss ...)
+  let t = Date.parse(iso);
+  if (Number.isNaN(t)) {
+    // 2️⃣ Fallback: tự bóc yyyy-mm-dd hh:mm[:ss] và coi là giờ local
+    const m = iso.match(
+      /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?/
+    );
+    if (!m) return "";
+
+    const [, y, mo, d, h, mi, s] = m;
+    const dt = new Date(
+      Number(y),
+      Number(mo) - 1,
+      Number(d),
+      Number(h),
+      Number(mi),
+      s ? Number(s) : 0
+    );
+    t = dt.getTime();
+  }
+
+  // 3️⃣ Tính chênh lệch
+  let diff = Date.now() - t;
+  if (diff < 0) diff = 0;
+
+  const mins = Math.floor(diff / 60_000);
+  const hours = Math.floor(mins / 60);
+
+  if (hours > 0) return `${hours}g${String(mins % 60).padStart(2, "0")}p`;
+  if (mins > 0) return `${mins} phút`;
+  return "Vừa xong";
+}
+
 
 // loại bỏ dấu tiếng Việt và chuyển thành chữ thường
 export function stripVN(s: string = ''): string {
