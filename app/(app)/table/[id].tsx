@@ -9,11 +9,13 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
+import type { WaiterCancelNotif } from '../../../src/hooks/notification/useWaiterOrderCancelled';
 import { stripVN } from '../../../src/lib/heplers/TableHelper';
 
 type MenuRow = {
@@ -41,7 +43,7 @@ export default function TableMenuScreen() {
   const [limit] = useState(200);
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<'all' | string>('all');
-
+  const [notifModalOpen, setNotifModalOpen] = useState(false);
   const menuQ = useMenu({
     page,
     limit,
@@ -263,6 +265,7 @@ export default function TableMenuScreen() {
               <Feather name="x" size={18} />
             </Pressable>
           )}
+           
         </View>
 
         {categories.length > 0 && (
@@ -320,6 +323,84 @@ export default function TableMenuScreen() {
           </Text>
         </Pressable>
       </View>
+     
     </View>
+  );
+}
+function WaiterCancelNotifModal({
+  visible,
+  onClose,
+  data,
+  onMarkRead,
+  onMarkAllRead,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  data: WaiterCancelNotif[];
+  onMarkRead: (id: string) => void | Promise<void>;
+  onMarkAllRead: () => void | Promise<void>;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={tw`flex-1 bg-black/40 justify-center px-6`}>
+        <View style={tw`rounded-2xl bg-white p-4 max-h-[80%]`}>
+          <View style={tw`flex-row items-center justify-between mb-2`}>
+            <Text style={tw`text-base font-semibold`}>Thông báo huỷ từ bếp</Text>
+            <Pressable onPress={onClose}>
+              <Text style={tw`text-slate-600`}>Đóng</Text>
+            </Pressable>
+          </View>
+
+          <FlatList
+            data={data}
+            keyExtractor={it => it.id}
+            ListEmptyComponent={
+              <View style={tw`py-4 items-center`}>
+                <Text style={tw`text-slate-500 text-sm`}>Chưa có thông báo.</Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => onMarkRead(item.id)}
+                style={tw`mb-2 p-3 rounded-xl border border-slate-200 ${
+                  !item.read ? 'bg-amber-50' : 'bg-white'
+                }`}
+              >
+                <View style={tw`flex-row justify-between mb-1`}>
+                  <Text style={tw`text-[13px] text-slate-500`}>
+                    {item.tableName ? `Bàn ${item.tableName}` : 'Không rõ bàn'}
+                  </Text>
+                  <Text style={tw`text-[11px] text-slate-400`}>
+                    {new Date(item.createdAt).toLocaleTimeString('vi-VN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </Text>
+                </View>
+
+                <Text style={tw`text-[14px] font-semibold mb-1`}>{item.title}</Text>
+                <Text style={tw`text-[13px] text-slate-700`}>{item.message}</Text>
+
+                {!!item.reason && (
+                  <Text style={tw`mt-1 text-[12px] text-slate-500`}>
+                    Lý do: {item.reason}
+                  </Text>
+                )}
+              </Pressable>
+            )}
+          />
+
+          {!!data.length && (
+            <View style={tw`mt-2 flex-row justify-between`}>
+              <Pressable onPress={onMarkAllRead}>
+                <Text style={tw`text-blue-600 text-sm font-semibold`}>
+                  Đánh dấu tất cả đã đọc
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 }
