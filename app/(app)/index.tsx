@@ -6,7 +6,7 @@ import { fmtElapsed, fmtMoney, stripVN } from "@lib/heplers/TableHelper";
 import tw from '@lib/tw';
 import { useAuth } from '@providers/AuthProvider';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -20,6 +20,7 @@ import SideDrawer from '../../src/components/drawer/SideDrawer';
 import HeaderBar from '../../src/components/table/HeaderBar';
 import type { WaiterCancelNotif } from '../../src/hooks/notification/useWaiterOrderCancelled';
 import { useWaiterOrderCancelled } from '../../src/hooks/notification/useWaiterOrderCancelled';
+import { getSocket } from '../../src/lib/socket';
 
 import { TableVM } from '../../src/types/table/TableType';
 
@@ -108,7 +109,15 @@ const ownerByTable = useMemo<Record<string, string | undefined>>(() => {
   currentUserId,
   orderCreatedAt,
 ]);
+useEffect(() => {
+    if (!profile?.userId) return;
 
+    const s = getSocket();
+    const room = `waiter:${profile.userId}`;
+
+    console.log('[waiter] join room', room);
+    s.emit('room:join', room);
+  }, [profile?.userId]);
   const filtered = useMemo(() => {
   const kw = stripVN(q.trim().toLowerCase());
   return tables.filter((t) => {
@@ -363,11 +372,11 @@ function WaiterCancelNotifModal({
                 <Text style={tw`text-[14px] font-semibold mb-1`}>{item.title}</Text>
                 <Text style={tw`text-[13px] text-slate-700`}>{item.message}</Text>
 
-                {!!item.reason && (
+                {/* {!!item.reason && (
                   <Text style={tw`mt-1 text-[12px] text-slate-500`}>
                     Lý do: {item.reason}
                   </Text>
-                )}
+                )} */}
               </Pressable>
             )}
           />
