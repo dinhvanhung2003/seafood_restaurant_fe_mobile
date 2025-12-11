@@ -333,28 +333,29 @@ try {
       <View style={tw`border border-slate-200 rounded-2xl p-3 mb-3`}>
         <Text style={tw`text-[13px] text-slate-700 mb-2`}>Ca làm việc</Text>
         <View style={tw`border border-slate-200 rounded-xl overflow-hidden`}>
-          <Picker
-            selectedValue={selectedScheduleId}
-            onValueChange={(v) => setSelectedScheduleId(v as string)}
-            enabled={!noShift && !isLoading}
-            style={tw`h-11`}
-          >
-            {noShift ? (
-              <Picker.Item
-                label="Hôm nay bạn không có ca"
-                value={undefined}
-              />
-            ) : (
-              (shifts as ShiftToday[]).map((sh) => (
-                <Picker.Item
-                  key={sh.scheduleId}
-                  label={`${sh.name} (${sh.start}–${sh.end})`}
-                  value={sh.scheduleId}
-                />
-              ))
-            )}
-          </Picker>
-        </View>
+  {noShift ? (
+    // Trường hiển thị thông tin khi không có ca
+    <View style={tw`h-11 justify-center px-3 bg-slate-50`}>
+      <Text style={tw`text-slate-400`}>Hôm nay bạn không có ca</Text>
+    </View>
+  ) : (
+    <Picker
+      selectedValue={selectedScheduleId}
+      onValueChange={(v) => setSelectedScheduleId(v as string)}
+      enabled={!isLoading}        // 👈 bỏ !noShift ở đây
+      style={tw`h-11`}
+    >
+      {(shifts as ShiftToday[]).map((sh) => (
+        <Picker.Item
+          key={sh.scheduleId}
+          label={`${sh.name} (${sh.start}–${sh.end})`}
+          value={sh.scheduleId}
+        />
+      ))}
+    </Picker>
+  )}
+</View>
+
 
         {/* Trạng thái chấm công của ca đang chọn */}
         {currentShift && (

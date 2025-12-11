@@ -3,7 +3,7 @@ import { AuthProvider, useAuth } from '@providers/AuthProvider';
 import QueryProvider from '@providers/QueryProvider';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
 import FlashMessage from 'react-native-flash-message';
 import '../global.css';
 import { getSocket } from '../src/lib/socket';
@@ -60,7 +60,12 @@ export default function RootLayout() {
        <AuthProvider>
       <AuthGate>
         <Stack screenOptions={{ headerShown: false }} />
-        <FlashMessage position="top" />
+        <FlashMessage
+        position="top"
+        floating
+        // đẩy xuống dưới icon/avatar, chỉnh số cho phù hợp
+        style={{ top: Platform.OS === "android" ? 60 : 50 }}
+      />
       </AuthGate>
     </AuthProvider>
     </QueryProvider>

@@ -1,3 +1,4 @@
+import { Feather } from '@expo/vector-icons';
 import { useTableSocketLive } from '@hooks/socket/socket/useTableSocketLive';
 import { useAreas } from '@hooks/useArea';
 import { useOrders } from '@hooks/useOrder';
@@ -5,10 +6,11 @@ import { fmtElapsed, fmtMoney, stripVN } from "@lib/heplers/TableHelper";
 import tw from '@lib/tw';
 import { useAuth } from '@providers/AuthProvider';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
   ScrollView,
   Text,
@@ -16,6 +18,9 @@ import {
 } from 'react-native';
 import SideDrawer from '../../src/components/drawer/SideDrawer';
 import HeaderBar from '../../src/components/table/HeaderBar';
+import type { WaiterCancelNotif } from '../../src/hooks/notification/useWaiterOrderCancelled';
+import { useWaiterOrderCancelled } from '../../src/hooks/notification/useWaiterOrderCancelled';
+import { getSocket } from '../../src/lib/socket';
 
 import { TableVM } from '../../src/types/table/TableType';
 
@@ -56,7 +61,13 @@ const ownerByTable = useMemo<Record<string, string | undefined>>(() => {
     () => ['Tất cả', ...Array.from(new Set((areas ?? []).map((a: any) => a.name)))],
     [areas],
   );
-
+ const [notifModalOpen, setNotifModalOpen] = useState(false);
+  const {
+    items: cancelNotifs,
+    unreadCount,
+    markRead,
+    markAllRead,
+  } = useWaiterOrderCancelled();
   const orderCreatedAt = useMemo<Record<string, string | undefined>>(() => {
     const rows: any[] = activeOrdersQuery?.data ?? [];
     const dict: Record<string, string> = {};
@@ -98,7 +109,15 @@ const ownerByTable = useMemo<Record<string, string | undefined>>(() => {
   currentUserId,
   orderCreatedAt,
 ]);
+useEffect(() => {
+    if (!profile?.userId) return;
 
+    const s = getSocket();
+    const room = `waiter:${profile.userId}`;
+
+    console.log('[waiter] join room', room);
+    s.emit('room:join', room);
+  }, [profile?.userId]);
   const filtered = useMemo(() => {
   const kw = stripVN(q.trim().toLowerCase());
   return tables.filter((t) => {
@@ -167,13 +186,32 @@ const ownerByTable = useMemo<Record<string, string | undefined>>(() => {
 
   return (
     <View style={tw`flex-1 bg-white mt-10`}>
-      <HeaderBar
-        onMenu={() => setDrawerOpen(true)}
-        searchValue={q}
-        onChangeSearch={setQ}
-        onClearSearch={() => setQ('')}
-        showActions={false}
-      />
+    <View style={tw`relative`}>
+        <HeaderBar
+          onMenu={() => setDrawerOpen(true)}
+          searchValue={q}
+          onChangeSearch={setQ}
+          onClearSearch={() => setQ('')}
+          showActions={false}
+        />
+
+        <Pressable
+          onPress={() => setNotifModalOpen(true)}
+          hitSlop={10}
+          style={tw`absolute right-4 top-3 flex-row items-center`}
+        >
+          <Feather name="bell" size={20} color="#0f172a" />
+          {!!unreadCount && (
+            <View
+              style={tw`-ml-2 -mt-2 w-4 h-4 rounded-full bg-red-500 items-center justify-center`}
+            >
+              <Text style={tw`text-[9px] text-white font-bold`}>
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </Text>
+            </View>
+          )}
+        </Pressable>
+      </View>
 
       <View style={tw`pt-3 pb-2 px-4`}>
         <Text style={tw`text-xl font-extrabold text-slate-900`}>Phòng bàn</Text>
@@ -270,6 +308,90 @@ const ownerByTable = useMemo<Record<string, string | undefined>>(() => {
   onClose={() => setDrawerOpen(false)}
   onLogout={logout}
 />
+<WaiterCancelNotifModal
+        visible={notifModalOpen}
+        onClose={() => setNotifModalOpen(false)}
+        data={cancelNotifs}
+        onMarkRead={markRead}
+        onMarkAllRead={markAllRead}
+      />
     </View>
+  );
+}
+function WaiterCancelNotifModal({
+  visible,
+  onClose,
+  data,
+  onMarkRead,
+  onMarkAllRead,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  data: WaiterCancelNotif[];
+  onMarkRead: (id: string) => void | Promise<void>;
+  onMarkAllRead: () => void | Promise<void>;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={tw`flex-1 bg-black/40 justify-center px-6`}>
+        <View style={tw`rounded-2xl bg-white p-4 max-h-[80%]`}>
+          <View style={tw`flex-row items-center justify-between mb-2`}>
+            <Text style={tw`text-base font-semibold`}>Thông báo huỷ từ bếp</Text>
+            <Pressable onPress={onClose}>
+              <Text style={tw`text-slate-600`}>Đóng</Text>
+            </Pressable>
+          </View>
+
+          <FlatList
+            data={data}
+            keyExtractor={it => it.id}
+            ListEmptyComponent={
+              <View style={tw`py-4 items-center`}>
+                <Text style={tw`text-slate-500 text-sm`}>Chưa có thông báo.</Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => onMarkRead(item.id)}
+                style={tw`mb-2 p-3 rounded-xl border border-slate-200 ${
+                  !item.read ? 'bg-amber-50' : 'bg-white'
+                }`}
+              >
+                <View style={tw`flex-row justify-between mb-1`}>
+                  <Text style={tw`text-[13px] text-slate-500`}>
+                    {item.tableName ? `Bàn ${item.tableName}` : 'Không rõ bàn'}
+                  </Text>
+                  <Text style={tw`text-[11px] text-slate-400`}>
+                    {new Date(item.createdAt).toLocaleTimeString('vi-VN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </Text>
+                </View>
+
+                <Text style={tw`text-[14px] font-semibold mb-1`}>{item.title}</Text>
+                <Text style={tw`text-[13px] text-slate-700`}>{item.message}</Text>
+
+                {/* {!!item.reason && (
+                  <Text style={tw`mt-1 text-[12px] text-slate-500`}>
+                    Lý do: {item.reason}
+                  </Text>
+                )} */}
+              </Pressable>
+            )}
+          />
+
+          {!!data.length && (
+            <View style={tw`mt-2 flex-row justify-between`}>
+              <Pressable onPress={onMarkAllRead}>
+                <Text style={tw`text-blue-600 text-sm font-semibold`}>
+                  Đánh dấu tất cả đã đọc
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 }

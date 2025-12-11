@@ -1,5 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { useKitchenFlow } from '@hooks/notification/useKitchenFlow';
+import type { HistoryItem } from '@hooks/notification/useKitchenHistory';
 import { useKitchenVoids } from '@hooks/notification/useKitchenVoids';
 import { useCancelSocketLive } from '@hooks/socket/socket/useCancelSocket';
 import { useKitchenProgress } from '@hooks/useKitchenProgress';
@@ -12,7 +13,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-
 import {
   ActivityIndicator,
   FlatList,
@@ -22,9 +22,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { AddCustomerModalMobile } from '../../../src/components/customer/modal/AddCustomerModalMobile';
 import CancelOneItemModal from '../../../src/components/modal/CancelOneItemModal';
+import { useKitchenHistory } from '../../../src/hooks/notification/useKitchenHistory';
 import { usePosSocketLive } from '../../../src/hooks/socket/socket/useSocket';
-
 type Meta = { id: string; name: string; price: number; image?: string };
 
 type CustomerLite = {
@@ -37,10 +38,10 @@ export default function OrderScreen() {
   const { id: tableId, name } = useLocalSearchParams<{ id: string; name?: string }>();
   const router = useRouter();
   const qc = useQueryClient();
-// ⭐ đánh dấu món (chỉ local, không gửi BE)
+//  đánh dấu món (chỉ local, không gửi BE)
   const [isPriority, setIsPriority] = useState(false);
 
-// ⭐ đánh dấu món (chỉ local, nhưng sẽ bật ưu tiên bếp)
+//  đánh dấu món (chỉ local, nhưng sẽ bật ưu tiên bếp)
 const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
 
   const toggleFlag = (rowKey: string) => {
@@ -59,13 +60,13 @@ const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
 };
 
   
-  console.log('STEP 1: start OrderScreen', tableId, name);
+  
 
   const [orderNote, setOrderNote] = useState('');
 
   const { orders } = useOrders();
 
-  console.log('STEP 2: after useOrders');
+  
 
   const [orderNoteModalOpen, setOrderNoteModalOpen] = useState(false);
   const [itemNoteModalOpen, setItemNoteModalOpen] = useState(false);
@@ -134,7 +135,8 @@ const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
     useKitchenVoids(currentOrderId);
 
   const { data: progress = [] } = useKitchenProgress(currentOrderId);
-
+const { data: history = [], isLoading: historyLoading } = useKitchenHistory(currentOrderId);
+  const [historyOpen, setHistoryOpen] = useState(false);
   usePosSocketLive(currentOrderId);
   useCancelSocketLive(currentOrderId);
 
@@ -242,7 +244,7 @@ const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
     const rowKey = item.rowId ?? item.id;
     const isFlagged = flaggedIds.includes(rowKey);
     const itemNote = (item as any).note ?? '';
- console.log('STEP 3: before JSX render');
+
     return (
       <View style={tw`px-4 py-3 border-b border-slate-100`}>
         <View style={tw`flex-row items-center gap-3`}>
@@ -455,34 +457,43 @@ const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
           <Text style={tw`text-[16px] font-bold`}>{total.toLocaleString('vi-VN')}</Text>
         </View>
 
-        <View style={tw`flex-row gap-3`}>
+     <View style={tw`flex-row gap-3`}>
+  {/* Nút lịch sử báo bếp */}
   <Pressable
-  onPress={async () => {
-    await onNotify({
-      tableName: name || String(tableId),
-      note: orderNote.trim() || undefined,
-      priority: isPriority,   // gửi ưu tiên lên BE
-      source: 'waiter',
-    });
+    onPress={() => setHistoryOpen(true)}
+    style={tw`w-20 h-12 rounded-xl border border-slate-300 items-center justify-center`}
+  >
+    <Feather name="clock" size={16} color="#0f172a" />
+    <Text style={tw`text-[11px] mt-0.5`}>Lịch sử</Text>
+  </Pressable>
 
-    // ⬇️ gửi xong thì reset trạng thái cho "lần sau"
-    setIsPriority(false);   // bỏ trạng thái ưu tiên
-    setFlaggedIds([]);      // ⭐ xoá hết món đã đánh sao → nút sao "ẩn" hết
-  }}
-  disabled={!canNotify || notifying}
-  style={tw`flex-1 h-12 rounded-xl border border-blue-600 items-center justify-center ${
-    !canNotify || notifying ? 'opacity-50' : ''
-  }`}
->
-  <Text style={tw`text-blue-600 font-bold`}>
-    {notifying ? 'Đang gửi...' : 'Thông báo'}
-  </Text>
-</Pressable>
+  {/* Nút thông báo bếp */}
+  <Pressable
+    onPress={async () => {
+      await onNotify({
+        tableName: name || String(tableId),
+        note: orderNote.trim() || undefined,
+        priority: isPriority,
+        source: 'waiter',
+      });
 
+      // gửi xong refresh luôn lịch sử
+      await qc.invalidateQueries({ queryKey: ['kitchen-history', currentOrderId] });
 
- 
+      setIsPriority(false);
+      setFlaggedIds([]);
+    }}
+    disabled={!canNotify || notifying}
+    style={tw`flex-1 h-12 rounded-xl border border-blue-600 items-center justify-center ${
+      !canNotify || notifying ? 'opacity-50' : ''
+    }`}
+  >
+    <Text style={tw`text-blue-600 font-bold`}>
+      {notifying ? 'Đang gửi...' : 'Thông báo'}
+    </Text>
+  </Pressable>
+</View>
 
-        </View>
       </View>
 
       {/* Modal huỷ một món */}
@@ -552,6 +563,14 @@ const [flaggedIds, setFlaggedIds] = useState<string[]>([]);
           }}
         />
       )}
+            {/* Modal lịch sử báo bếp */}
+      <KitchenHistoryModal
+        visible={historyOpen}
+        loading={historyLoading}
+        data={history}
+        onClose={() => setHistoryOpen(false)}
+      />
+
     </View>
   );
 }
@@ -636,29 +655,41 @@ function SelectCustomerModal({
   onSelected: (c: CustomerLite) => void | Promise<void>;
   onClear?: () => void;
 }) {
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<CustomerLite[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const handleSearch = async () => {
-    if (!q.trim()) return;
-    try {
-      setLoading(true);
-      const { data } = await http.get('/customers', {
-        params: { search: q.trim(), limit: 20 },
-      });
-      const rows = Array.isArray(data?.data) ? data.data : data ?? [];
-      setResults(
-        rows.map((r: any) => ({
-          id: r.id,
-          name: r.name,
-          phone: r.phone,
-        })),
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (!q.trim()) return;
+  try {
+    setLoading(true);
+    // ✅ Giống web POS: /cashier/customers?q=...
+    const { data } = await http.get("/customers", {
+      params: { q: q.trim() },
+    });
+
+    // Ở POS web `useCustomer(q)` thường trả thẳng mảng
+    const rows = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.data)
+      ? data.data
+      : [];
+
+    setResults(
+      rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        phone: r.phone,
+      })),
+    );
+  } catch (e: any) {
+    console.log("Search customer error:", e?.response?.status, e?.response?.data);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -666,18 +697,27 @@ function SelectCustomerModal({
         <View style={tw`rounded-2xl bg-white p-4`}>
           <Text style={tw`text-base font-semibold mb-2`}>Chọn khách hàng</Text>
 
+          {/* Ô search giống web (tên / SĐT) + nút thêm khách */}
           <View style={tw`flex-row items-center mb-3`}>
             <TextInput
               style={tw`flex-1 border border-slate-200 rounded-xl px-3 h-10`}
               placeholder="Tìm theo tên / SĐT"
               value={q}
               onChangeText={setQ}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
             />
             <Pressable
               onPress={handleSearch}
               style={tw`ml-2 px-3 h-10 rounded-xl bg-blue-600 items-center justify-center`}
             >
               <Text style={tw`text-white font-semibold`}>Tìm</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setCreateOpen(true)}
+              style={tw`ml-2 px-3 h-10 rounded-xl bg-emerald-600 items-center justify-center`}
+            >
+              <Text style={tw`text-white font-semibold`}>＋</Text>
             </Pressable>
           </View>
 
@@ -689,7 +729,7 @@ function SelectCustomerModal({
             <FlatList
               data={results}
               keyExtractor={it => it.id}
-              style={{ maxHeight: 280 }} // tránh dùng [40vh]
+              style={{ maxHeight: 280 }}
               ListEmptyComponent={
                 <View style={tw`py-4 items-center`}>
                   <Text style={tw`text-slate-500 text-sm`}>Không có kết quả.</Text>
@@ -722,9 +762,25 @@ function SelectCustomerModal({
           </View>
         </View>
       </View>
+
+      {/* Modal thêm khách mới (mobile) */}
+      <AddCustomerModalMobile
+        visible={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={async c => {
+          // giống web: tạo xong -> select luôn khách đó
+          await onSelected({
+            id: c.id,
+            name: c.name,
+            phone: c.phone,
+          });
+          setCreateOpen(false);
+        }}
+      />
     </Modal>
   );
 }
+
 
 function GuestCountModalMobile({
   visible,
@@ -844,6 +900,89 @@ function NotePriorityModal({
               <Text style={tw`text-white font-semibold`}>Lưu</Text>
             </Pressable>
           </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+function formatKitchenTime(iso: string) {
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
+function KitchenHistoryModal({
+  visible,
+  loading,
+  data,
+  onClose,
+}: {
+  visible: boolean;
+  loading: boolean;
+  data: HistoryItem[];
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={tw`flex-1 bg-black/40 justify-center px-4`}>
+        <View style={tw`max-h-[80%] rounded-2xl bg-white p-4`}>
+          <View style={tw`flex-row items-center justify-between mb-2`}>
+            <Text style={tw`text-base font-semibold`}>Lịch sử báo bếp</Text>
+            <Pressable onPress={onClose}>
+              <Text style={tw`text-slate-600`}>Đóng</Text>
+            </Pressable>
+          </View>
+
+          {loading ? (
+            <View style={tw`py-6 items-center`}>
+              <ActivityIndicator />
+            </View>
+          ) : data.length === 0 ? (
+            <View style={tw`py-4 items-center`}>
+              <Text style={tw`text-sm text-slate-500`}>Chưa có lịch sử.</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={data}
+              keyExtractor={(it) => it.id}
+              style={{ maxHeight: 400 }}
+              renderItem={({ item }) => (
+                <View style={tw`mb-3 rounded-xl border border-slate-200`}>
+                  <View style={tw`px-3 py-2`}>
+                    <Text style={tw`text-[11px] text-slate-500`}>
+                      {formatKitchenTime(item.createdAt)}
+                    </Text>
+                    <Text style={tw`mt-0.5 text-[13px] font-medium text-slate-900`}>
+                      {item.staff} thông báo bếp {item.priority ? ' (ƯU TIÊN)' : ''}
+                    </Text>
+                    {!!item.note && (
+                      <Text style={tw`mt-0.5 text-[12px] text-slate-600`}>
+                        Ghi chú: {item.note}
+                      </Text>
+                    )}
+                  </View>
+
+                  <View style={tw`border-t border-slate-100 px-3 py-2`}>
+                    {item.items.map((it, idx) => (
+                      <View
+                        key={`${it.menuItemId}-${idx}`}
+                        style={tw`flex-row items-center gap-2 mb-0.5`}
+                      >
+                        <Text style={tw`text-[11px] text-slate-400`}>•</Text>
+                        <Text style={tw`text-[13px] text-slate-800`}>
+                          + {it.qty} {it.name}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            />
+          )}
         </View>
       </View>
     </Modal>
